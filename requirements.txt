@@ -1,0 +1,11 @@
+streamlit
+pandas
+numpy
+scipy
+plotly
+seaborn
+json
+io
+re
+matplotlib
+openpyxl

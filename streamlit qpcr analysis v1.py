@@ -869,44 +869,55 @@ with tab4:
                 
                 with col1:
                     settings['orientation'] = st.radio("Orientation", ['vertical', 'horizontal'], 
+                                                      index=0 if settings['orientation'] == 'vertical' else 1,
                                                       key=f"orient_{gene}")
                     settings['color_scheme'] = st.selectbox("Theme", 
                         ['plotly_white', 'plotly', 'plotly_dark', 'seaborn', 'simple_white', 
                          'presentation', 'ggplot2', 'none'],
+                        index=['plotly_white', 'plotly', 'plotly_dark', 'seaborn', 'simple_white', 
+                               'presentation', 'ggplot2', 'none'].index(settings.get('color_scheme', 'plotly_white')),
                         key=f"theme_{gene}")
-                    settings['bar_width'] = st.slider("Bar Width", 0.1, 1.5, settings['bar_width'], 
+                    settings['bar_width'] = st.slider("Bar Width", 0.1, 1.5, 
+                                                     float(settings.get('bar_width', 0.8)), 
                                                      key=f"barw_{gene}")
                 
                 with col2:
-                    settings['show_error'] = st.checkbox("Error Bars", settings['show_error'], 
+                    settings['show_error'] = st.checkbox("Error Bars", 
+                                                        bool(settings.get('show_error', True)), 
                                                         key=f"err_{gene}")
                     if settings['show_error']:
                         settings['error_bar_thickness'] = st.slider("Error Bar Thickness", 1, 5, 
-                                                                   settings['error_bar_thickness'],
+                                                                   int(settings.get('error_bar_thickness', 2)),
                                                                    key=f"errthick_{gene}")
                         settings['error_bar_width'] = st.slider("Error Bar Width", 2, 10, 
-                                                               settings['error_bar_width'],
+                                                               int(settings.get('error_bar_width', 4)),
                                                                key=f"errwidth_{gene}")
                     
                     settings['show_significance'] = st.checkbox("Significance Stars", 
-                                                               settings['show_significance'],
+                                                               bool(settings.get('show_significance', True)),
                                                                key=f"sig_{gene}")
                     if settings['show_significance']:
+                        sig_positions = ['outside', 'inside', 'auto']
+                        current_sig_pos = settings.get('sig_position', 'outside')
                         settings['sig_position'] = st.selectbox("Star Position", 
-                            ['outside', 'inside', 'auto'], key=f"sigpos_{gene}")
+                            sig_positions,
+                            index=sig_positions.index(current_sig_pos) if current_sig_pos in sig_positions else 0,
+                            key=f"sigpos_{gene}")
                 
                 with col3:
-                    settings['show_grid'] = st.checkbox("Grid", settings['show_grid'], 
+                    settings['show_grid'] = st.checkbox("Grid", 
+                                                       bool(settings.get('show_grid', True)), 
                                                        key=f"grid_{gene}")
                     settings['show_reference_line'] = st.checkbox("Reference Line", 
-                                                                 settings['show_reference_line'],
+                                                                 bool(settings.get('show_reference_line', True)),
                                                                  key=f"refline_{gene}")
                     if settings['show_reference_line']:
                         settings['reference_value'] = st.number_input("Reference Value", 
-                            value=settings['reference_value'], key=f"refval_{gene}")
+                            value=float(settings.get('reference_value', 1.0)), 
+                            key=f"refval_{gene}")
                     
                     settings['bar_border_width'] = st.slider("Bar Border Width", 0, 5, 
-                                                            settings['bar_border_width'],
+                                                            int(settings.get('bar_border_width', 0)),
                                                             key=f"border_{gene}")
             
             # TAB: Colors
@@ -946,28 +957,32 @@ with tab4:
                 col1, col2 = st.columns(2)
                 
                 with col1:
-                    settings['title'] = st.text_input("Title", settings['title'], 
+                    settings['title'] = st.text_input("Title", 
+                                                     str(settings.get('title', f"{gene} Expression")), 
                                                      key=f"title_{gene}")
-                    settings['xlabel'] = st.text_input("X-axis Label", settings['xlabel'], 
+                    settings['xlabel'] = st.text_input("X-axis Label", 
+                                                      str(settings.get('xlabel', 'Condition')), 
                                                       key=f"xlabel_{gene}")
-                    settings['ylabel'] = st.text_input("Y-axis Label", settings['ylabel'], 
+                    settings['ylabel'] = st.text_input("Y-axis Label", 
+                                                      str(settings.get('ylabel', 'Fold Change (Relative to Baseline)')), 
                                                       key=f"ylabel_{gene}")
                 
                 with col2:
-                    settings['title_size'] = st.slider("Title Size", 12, 36, settings['title_size'],
+                    settings['title_size'] = st.slider("Title Size", 12, 36, 
+                                                      int(settings.get('title_size', 20)),
                                                       key=f"titsize_{gene}")
                     settings['axis_label_size'] = st.slider("Axis Label Size", 10, 24, 
-                                                           settings['axis_label_size'],
+                                                           int(settings.get('axis_label_size', 14)),
                                                            key=f"axsize_{gene}")
                     settings['tick_font_size'] = st.slider("Tick Font Size", 8, 20, 
-                                                          settings['tick_font_size'],
+                                                          int(settings.get('tick_font_size', 12)),
                                                           key=f"ticksize_{gene}")
                     settings['sig_font_size'] = st.slider("Significance Size", 10, 24, 
-                                                         settings['sig_font_size'],
+                                                         int(settings.get('sig_font_size', 16)),
                                                          key=f"sigsize_{gene}")
                 
                 settings['x_tick_angle'] = st.slider("X-axis Tick Angle", -90, 90, 
-                                                     settings['x_tick_angle'],
+                                                     int(settings.get('x_tick_angle', -45)),
                                                      key=f"tickangle_{gene}")
             
             # TAB: Advanced
@@ -977,36 +992,50 @@ with tab4:
                 with col1:
                     st.markdown("**Figure Dimensions**")
                     settings['figure_width'] = st.number_input("Width (px)", 400, 2000, 
-                                                              settings['figure_width'],
+                                                              int(settings.get('figure_width', 1000)),
                                                               key=f"width_{gene}")
                     settings['figure_height'] = st.number_input("Height (px)", 300, 1500, 
-                                                               settings['figure_height'],
+                                                               int(settings.get('figure_height', 600)),
                                                                key=f"height_{gene}")
                 
                 with col2:
                     st.markdown("**Margins**")
-                    settings['margin_left'] = st.number_input("Left", 0, 200, settings['margin_left'],
+                    settings['margin_left'] = st.number_input("Left", 0, 200, 
+                                                             int(settings.get('margin_left', 80)),
                                                              key=f"ml_{gene}")
-                    settings['margin_right'] = st.number_input("Right", 0, 200, settings['margin_right'],
+                    settings['margin_right'] = st.number_input("Right", 0, 200, 
+                                                              int(settings.get('margin_right', 80)),
                                                               key=f"mr_{gene}")
-                    settings['margin_top'] = st.number_input("Top", 0, 200, settings['margin_top'],
+                    settings['margin_top'] = st.number_input("Top", 0, 200, 
+                                                            int(settings.get('margin_top', 100)),
                                                             key=f"mt_{gene}")
-                    settings['margin_bottom'] = st.number_input("Bottom", 0, 200, settings['margin_bottom'],
+                    settings['margin_bottom'] = st.number_input("Bottom", 0, 200, 
+                                                               int(settings.get('margin_bottom', 80)),
                                                                key=f"mb_{gene}")
                 
                 with col3:
                     st.markdown("**Y-axis Range**")
-                    if st.checkbox(f"Custom Y range for {gene}", key=f"yrange_{gene}"):
-                        y_min = st.number_input("Y min", value=0.0, key=f"ymin_{gene}")
-                        y_max = st.number_input("Y max", value=3.0, key=f"ymax_{gene}")
+                    current_y_range = settings.get('y_range')
+                    use_custom_y = st.checkbox(f"Custom Y range for {gene}", 
+                                              value=current_y_range is not None,
+                                              key=f"yrange_{gene}")
+                    if use_custom_y:
+                        y_min = st.number_input("Y min", 
+                                               value=float(current_y_range[0] if current_y_range else 0.0), 
+                                               key=f"ymin_{gene}")
+                        y_max = st.number_input("Y max", 
+                                               value=float(current_y_range[1] if current_y_range else 3.0), 
+                                               key=f"ymax_{gene}")
                         settings['y_range'] = [y_min, y_max]
                     else:
                         settings['y_range'] = None
                     
                     st.markdown("**Background Colors**")
-                    settings['plot_bgcolor'] = st.color_picker("Plot BG", settings['plot_bgcolor'],
+                    settings['plot_bgcolor'] = st.color_picker("Plot BG", 
+                                                               str(settings.get('plot_bgcolor', 'white')),
                                                                key=f"plotbg_{gene}")
-                    settings['paper_bgcolor'] = st.color_picker("Paper BG", settings['paper_bgcolor'],
+                    settings['paper_bgcolor'] = st.color_picker("Paper BG", 
+                                                                str(settings.get('paper_bgcolor', 'white')),
                                                                 key=f"paperbg_{gene}")
             
             # Generate graph

@@ -684,14 +684,14 @@ with tab2:
                     st.session_state.sample_mapping.setdefault(s, {})
                     st.session_state.sample_mapping[s]['include'] = True
                 st.session_state.excluded_samples = set()
-                st.experimental_rerun()
+                st.rerun()
         with col_b:
             if st.button("🚫 Exclude ALL"):
                 for s in st.session_state.sample_order:
                     st.session_state.sample_mapping.setdefault(s, {})
                     st.session_state.sample_mapping[s]['include'] = False
                 st.session_state.excluded_samples = set(st.session_state.sample_order)
-                st.experimental_rerun()
+                st.rerun()
         with col_c:
             st.markdown("Use the move buttons to reorder samples; that order is used for plotting.")
 
@@ -732,13 +732,13 @@ with tab2:
                     order = st.session_state.sample_order
                     order[i-1], order[i] = order[i], order[i-1]
                     st.session_state.sample_order = order
-                    st.experimental_rerun()
+                    st.rerun()
             with col_right:
                 if st.button("⬇ Move Down", key=f"down_{sample}") and i < len(st.session_state.sample_order)-1:
                     order = st.session_state.sample_order
                     order[i+1], order[i] = order[i], order[i+1]
                     st.session_state.sample_order = order
-                    st.experimental_rerun()
+                    st.rerun()
 
         # Update excluded_samples set from per-sample include flags
         st.session_state.excluded_samples = set([s for s,v in st.session_state.sample_mapping.items() if not v.get('include', True)])
@@ -923,7 +923,7 @@ with tab4:
             if st.button("🔄 Reset Graph Settings"):
                 if 'graph_settings' in st.session_state:
                     del st.session_state['graph_settings']
-                st.experimental_rerun()
+                st.rerun()
         with col2:
             st.markdown("Presets removed — use sliders & controls to customize.")
 

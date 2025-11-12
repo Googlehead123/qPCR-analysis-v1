@@ -1163,13 +1163,15 @@ with tab3:
     else:
         st.info("⏳ No analysis results yet. Go to 'Sample Mapping' tab and click 'Run Full Analysis Now'")
         
-# ==================== TAB 4: GRAPHS (IMPROVED UI/UX) ====================
+# ==================== TAB 4: GRAPHS (IMPROVED UI/UX - ERROR-SAFE) ====================
 with tab4:
     st.header("Step 4: Advanced Gene Visualization 📈")
     st.markdown("---")
     
     if st.session_state.processed_data:
-        # --- Persistent Settings Initialization (New Defaults) ---
+        
+        # --- Persistent Settings Initialization ---
+        # 1. Global Settings
         if 'graph_settings' not in st.session_state:
             st.session_state.graph_settings = { 
                 'title_size': 24, 'font_size': 12, 'sig_font_size': 18, 
@@ -1180,10 +1182,31 @@ with tab4:
                 'bar_colors': {}, 'error_multiplier': 1.96, 'bar_opacity': 0.95, 
                 'bar_gap': 0.1, 'marker_line_width': 1, 'show_legend': False, 
                 'y_log_scale': False, 'y_min': 0, 'y_max': None,
-                'bar_colors_per_sample': {} # Ensure this is initialized
+                'bar_colors_per_sample': {}
             }
+            
+        # 2. Per-Gene Customizations (Dedicated Dictionary for safety and clarity)
+        if 'gene_customizations' not in st.session_state:
+            st.session_state.gene_customizations = {}
 
-        # --- High-Level Global Defaults/Reset Panel (Compact Expander) ---
+        # --- PRE-INITIALIZE ALL GENE SETTINGS (CRITICAL ERROR FIX) ---
+        # This loop runs once or on rerun, ensuring all necessary keys exist 
+        # BEFORE the main plotting loop (the one that causes the error) begins.
+        for gene in st.session_state.processed_data.keys():
+            if gene not in st.session_state.gene_customizations:
+                st.session_state.gene_customizations[gene] = {
+                    'title_size': st.session_state.graph_settings['title_size'],
+                    'y_log_scale': st.session_state.graph_settings['y_log_scale'],
+                    'y_min': st.session_state.graph_settings['y_min'],
+                    'y_max': st.session_state.graph_settings['y_max'],
+                    'bar_gap': st.session_state.graph_settings['bar_gap'],
+                    'tick_angle': -45, # Default value
+                    'bg_color': '#FFFFFF', # Default value
+                    'grid_color': '#E5E5E5', # Default value
+                }
+        
+        # --- Global Defaults/Reset Panel (Compact Expander) ---
+        # This replaces the old, large Global Graph Settings panel
         with st.expander("🛠️ Global Visualization Defaults & Reset", expanded=False):
             col_g1, col_g2, col_g3 = st.columns(3)
             
@@ -1207,8 +1230,10 @@ with tab4:
                 st.session_state.graph_settings['show_error'] = st.checkbox("Show Error Bars", st.session_state.graph_settings['show_error'], key='g_error')
                 st.session_state.graph_settings['show_significance'] = st.checkbox("Show Significance Stars", st.session_state.graph_settings['show_significance'], key='g_sig')
                 if st.button("🔄 Reset ALL Settings", use_container_width=True):
-                    del st.session_state.graph_settings
-                    if 'graphs' in st.session_state: del st.session_state.graphs
+                    # Safely delete keys and force a rerun
+                    for key in ['graph_settings', 'gene_customizations', 'graphs']:
+                         if key in st.session_state:
+                             del st.session_state[key]
                     st.rerun()
 
         st.markdown("---")
@@ -1219,7 +1244,11 @@ with tab4:
         # Use columns for a clean 2-column layout of genes
         gene_columns = st.columns(2)
         
+        # Iterate over the stable dictionary keys
         for i, gene in enumerate(st.session_state.processed_data.keys()):
+            # Get the dedicated settings dictionary for the current gene
+            gene_settings = st.session_state.gene_customizations[gene] 
+            
             with gene_columns[i % 2]:
                 
                 # --- High-Tech Panel Container (CSS for WoW factor) ---
@@ -1238,23 +1267,17 @@ with tab4:
                 # --- 1. Compact Customization Bar ---
                 col_c1, col_c2, col_c3, col_c4, col_c5 = st.columns([1, 1.5, 1, 1, 1])
                 
-                # Toggle Log Scale
+                # Toggle Log Scale (Uses gene_settings directly)
                 with col_c1:
-                    log_key = f"{gene}_log_scale"
-                    if log_key not in st.session_state.graph_settings:
-                        st.session_state.graph_settings[log_key] = st.session_state.graph_settings['y_log_scale']
-                    st.session_state.graph_settings[log_key] = st.checkbox(
-                        "Log Y", st.session_state.graph_settings[log_key], key=f"log_y_{gene}", help="Toggle Y-axis logarithmic scale", label_visibility="collapsed"
+                    gene_settings['y_log_scale'] = st.checkbox(
+                        "Log Y", gene_settings['y_log_scale'], key=f"log_y_{gene}", help="Toggle Y-axis logarithmic scale", label_visibility="collapsed"
                     )
                     st.caption("Log Y")
                     
-                # Title Size Override
+                # Title Size Override (Uses gene_settings directly)
                 with col_c2:
-                    title_size_key = f"{gene}_title_size"
-                    if title_size_key not in st.session_state.graph_settings:
-                        st.session_state.graph_settings[title_size_key] = st.session_state.graph_settings['title_size']
-                    st.session_state.graph_settings[title_size_key] = st.slider(
-                        "Title Size", 10, 40, st.session_state.graph_settings[title_size_key], key=f"ts_{gene}", label_visibility="collapsed"
+                    gene_settings['title_size'] = st.slider(
+                        "Title Size", 10, 40, gene_settings['title_size'], key=f"ts_{gene}", label_visibility="collapsed"
                     )
                     st.caption("Title Size")
                 
@@ -1262,19 +1285,12 @@ with tab4:
                 with col_c3:
                     with st.popover("📐 Range"):
                         st.markdown("**Y-Axis Range**")
-                        y_min_key = f"{gene}_y_min"
-                        y_max_key = f"{gene}_y_max"
                         
-                        if y_min_key not in st.session_state.graph_settings:
-                            st.session_state.graph_settings[y_min_key] = st.session_state.graph_settings['y_min']
-                        if y_max_key not in st.session_state.graph_settings:
-                            st.session_state.graph_settings[y_max_key] = st.session_state.graph_settings['y_max']
-                            
-                        st.session_state.graph_settings[y_min_key] = st.number_input(
-                            "Min Y", value=st.session_state.graph_settings[y_min_key], key=f"ymin_{gene}"
+                        gene_settings['y_min'] = st.number_input(
+                            "Min Y", value=gene_settings['y_min'], key=f"ymin_{gene}"
                         )
-                        st.session_state.graph_settings[y_max_key] = st.number_input(
-                            "Max Y", value=st.session_state.graph_settings[y_max_key], key=f"ymax_{gene}"
+                        gene_settings['y_max'] = st.number_input(
+                            "Max Y", value=gene_settings['y_max'], key=f"ymax_{gene}"
                         )
                     st.caption("Y-Axis")
 
@@ -1286,45 +1302,33 @@ with tab4:
                         
                         with col_l1:
                             # Bar Gap
-                            bar_gap_key = f"{gene}_bar_gap"
-                            if bar_gap_key not in st.session_state.graph_settings:
-                                st.session_state.graph_settings[bar_gap_key] = st.session_state.graph_settings['bar_gap']
-                            st.session_state.graph_settings[bar_gap_key] = st.slider(
-                                "Bar Gap", 0.0, 0.5, st.session_state.graph_settings[bar_gap_key], 0.01, key=f"gap_{gene}", label_visibility="collapsed"
+                            gene_settings['bar_gap'] = st.slider(
+                                "Bar Gap", 0.0, 0.5, gene_settings['bar_gap'], 0.01, key=f"gap_{gene}", label_visibility="collapsed"
                             )
                             # X-Tick Angle
-                            tick_angle_key = f"{gene}_tick_angle"
-                            if tick_angle_key not in st.session_state.graph_settings:
-                                st.session_state.graph_settings[tick_angle_key] = -45
-                            st.session_state.graph_settings[tick_angle_key] = st.slider( 
-                                "X-Tick Angle", -90, 90, st.session_state.graph_settings[tick_angle_key], key=f"tickang_{gene}", label_visibility="collapsed"
+                            gene_settings['tick_angle'] = st.slider( 
+                                "X-Tick Angle", -90, 90, gene_settings['tick_angle'], key=f"tickang_{gene}", label_visibility="collapsed"
                             )
                             
                         with col_l2:
                             # Plot BG Color
-                            bg_color_key = f"{gene}_bg_color"
-                            if bg_color_key not in st.session_state.graph_settings:
-                                st.session_state.graph_settings[bg_color_key] = '#FFFFFF'
-                            st.session_state.graph_settings[bg_color_key] = st.color_picker(
-                                "BG Color", st.session_state.graph_settings[bg_color_key], key=f"bgc_{gene}", label_visibility="collapsed"
+                            gene_settings['bg_color'] = st.color_picker(
+                                "BG Color", gene_settings['bg_color'], key=f"bgc_{gene}", label_visibility="collapsed"
                             )
                             # Grid Color
-                            grid_color_key = f"{gene}_grid_color"
-                            if grid_color_key not in st.session_state.graph_settings:
-                                st.session_state.graph_settings[grid_color_key] = '#E5E5E5'
-                            st.session_state.graph_settings[grid_color_key] = st.color_picker(
-                                "Grid Color", st.session_state.graph_settings[grid_color_key], key=f"gc_{gene}", label_visibility="collapsed"
+                            gene_settings['grid_color'] = st.color_picker(
+                                "Grid Color", gene_settings['grid_color'], key=f"gc_{gene}", label_visibility="collapsed"
                             )
                     st.caption("Layout")
                 
-                # Color Picker Popover (Consolidates all color controls)
+                # Color Picker Popover
                 with col_c5:
                     gene_data_for_color = st.session_state.processed_data[gene]
                     conditions = gene_data_for_color['Condition'].unique()
                     
                     with st.popover("🎨 Colors"):
                         st.markdown(f"**Gene Default Color:**")
-                        default_color = st.session_state.graph_settings['bar_colors'].get(gene, '#007bff') # Use a more prominent default color
+                        default_color = st.session_state.graph_settings['bar_colors'].get(gene, '#007bff')
                         st.session_state.graph_settings['bar_colors'][gene] = st.color_picker(
                             f"Default Color for {gene}", default_color, key=f"gene_color_{gene}"
                         )
@@ -1352,11 +1356,12 @@ with tab4:
                             
                             with col_bar_r:
                                 st.markdown("<div style='padding-top: 25px;'>", unsafe_allow_html=True)
+                                # The reset button deletes from a nested dictionary, which is safe.
                                 if st.button("X", key=f"reset_{gene}_{condition}", help="Reset to gene default", use_container_width=True):
                                     if custom_key in st.session_state.graph_settings['bar_colors_per_sample']:
                                         del st.session_state.graph_settings['bar_colors_per_sample'][custom_key]
-                                    st.rerun()
-                                st.markdown("</div>", unsafe_allow_html=True)
+                                    st.rerun() 
+
                     st.caption("Bar Colors")
 
 
@@ -1364,14 +1369,9 @@ with tab4:
 
                 # --- 2. Generate and Display Graph ---
                 
-                # Consolidate all settings for this gene to pass to the plot function
-                gene_settings = st.session_state.graph_settings.copy()
-                # Apply gene-specific overrides
-                for key in gene_settings.keys():
-                    if key.startswith(f"{gene}_"):
-                        # Map gene-specific keys (e.g., 'GENE_y_min') back to base keys (e.g., 'y_min')
-                        base_key = key.split(f"{gene}_", 1)[1]
-                        gene_settings[base_key] = gene_settings[key]
+                # Merge global settings with gene-specific overrides for final plotting
+                final_settings = st.session_state.graph_settings.copy()
+                final_settings.update(gene_settings) # Override global settings with gene-specific settings
                 
                 gene_data = st.session_state.processed_data[gene]
                 sample_order = st.session_state.get('sample_order')
@@ -1379,7 +1379,7 @@ with tab4:
                 fig = GraphGenerator.create_gene_graph(
                     gene_data,
                     gene,
-                    gene_settings, # Pass the consolidated settings
+                    final_settings, # Pass the consolidated final settings
                     efficacy_config,
                     sample_order
                 )
@@ -1393,8 +1393,7 @@ with tab4:
 
     else:
         st.warning("⚠️ Run the analysis in the 'Analysis' tab first.")
-        
-        
+    
 # ==================== TAB 5: EXPORT ====================
 with tab5:
     st.header("Step 5: Export All Results")

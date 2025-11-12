@@ -437,62 +437,70 @@ class GraphGenerator:
         if missing_cols:
             st.error(f"❌ Cannot generate graph for gene **{gene}**.")
             st.error(f"Missing required data columns: {', '.join(missing_cols)}.")
-            st.error("Please ensure the analysis in **Step 3: Analysis** was run successfully.")
+            st.error("Please ensure the analysis in **Step 3: Analysis** was run successfully, and that a **Housekeeping Gene** and **Reference Control** are properly defined.")
             # Return a blank figure to prevent the script from crashing Plotly
-            return go.Figure().update_layout(title=f"Error: Data Missing for {gene}", yaxis_visible=False, xaxis_visible=False)
+            return go.Figure().update_layout(
+                title=f"Error: Data Missing for {gene}", 
+                annotations=[
+                    dict(
+                        text=f"Data columns missing: {', '.join(missing_cols)}. Check Step 3.",
+                        xref="paper", yref="paper", x=0.5, y=0.5, showarrow=False,
+                        font=dict(size=14, color="red")
+                    )
+                ],
+                yaxis_visible=False, xaxis_visible=False, 
+                plot_bgcolor='#f0f0f0'
+            )
         
         # 2. Apply Settings and Prepare Data
         bar_gap = settings.get('bar_gap', 0.1)
-        show_error = settings.get('show_error', True)
         show_significance = settings.get('show_significance', True)
         
         # Ensure sample order is respected
         data['Condition'] = pd.Categorical(data['Condition'], categories=sample_order, ordered=True)
         data = data.sort_values('Condition')
         
-        # Determine colors based on control/treatment status
-        colors = []
-        for condition in data['Condition']:
-            custom_key = f"{gene}_{condition}"
-            
-            # --- Per-Bar Error Bar and Sig Toggle Check ---
-            # These are stored in final_settings/st.session_state.graph_settings by the main loop
-            per_bar_show_error = settings.get(f"show_error_{gene}_{condition}", True)
-            per_bar_show_sig = settings.get(f"show_sig_{gene}_{condition}", True)
-            
-            # Color logic
-            if custom_key in settings['bar_colors_per_sample']:
-                colors.append(settings['bar_colors_per_sample'][custom_key])
-            elif condition == efficacy_config.get('controls', {}).get('negative'):
-                colors.append('#C0C0C0')  # Medium Grey for Negative Control
-            elif condition == efficacy_config.get('controls', {}).get('positive'):
-                colors.append('#C0C0C0')  # Medium Grey for Positive Control
-            else:
-                # Default treatment color (which is set in session state initialization)
-                colors.append(settings['bar_colors'].get(gene, '#A9A9A9'))
-
         # 3. Base Bar Chart Figure
         # Create a list of bar traces, one for each condition, to handle individual error bar visibility
         bar_traces = []
-        for i, condition in enumerate(data['Condition']):
-            row = data[data['Condition'] == condition].iloc[0]
-            per_bar_show_error = settings.get(f"show_error_{gene}_{condition}", True)
+        
+        for condition_name in data['Condition'].unique():
+            # Get the single row corresponding to the condition
+            row = data[data['Condition'] == condition_name].iloc[0]
+            
+            # --- Per-Bar Feature Toggles ---
+            per_bar_show_error = settings.get(f"show_error_{gene}_{condition_name}", True)
+            
+            # --- Color Logic ---
+            custom_key = f"{gene}_{condition_name}"
+            
+            if custom_key in settings['bar_colors_per_sample']:
+                color = settings['bar_colors_per_sample'][custom_key]
+            elif condition_name == efficacy_config.get('controls', {}).get('negative'):
+                color = '#C0C0C0'  # Medium Grey for Negative Control
+            elif condition_name == efficacy_config.get('controls', {}).get('positive'):
+                color = '#C0C0C0'  # Medium Grey for Positive Control
+            else:
+                # Default treatment color (which defaults to a base grey/white)
+                color = settings['bar_colors'].get(gene, '#FFFFFF') 
 
+            # Create the trace for this single bar
             bar_traces.append(
                 go.Bar(
                     x=[row['Condition']],
                     y=[row['Fold Change']],
+                    # ERROR BAR CONFIGURATION (Using the per-bar toggle)
                     error_y={
                         'type': 'data',
                         'array': [row['SEM'] * settings.get('error_multiplier', 1.96)],
                         'visible': per_bar_show_error
                     },
-                    marker_color=colors[i],
+                    marker_color=color,
                     marker_line_color='#333333',
                     marker_line_width=settings.get('marker_line_width', 1.5),
                     opacity=settings.get('bar_opacity', 0.95),
-                    name=condition,
-                    hovertemplate=f"Condition: {row['Condition']}<br>Fold Change: {row['Fold Change']:.2f}<br>P-value: {row['P-value']:.4f}<extra></extra>",
+                    name=condition_name, # Use condition name for trace name (though legend is hidden)
+                    hovertemplate=f"Condition: {row['Condition']}<br>Fold Change: %{{y:.2f}}<br>P-value: {row['P-value']:.4f}<extra></extra>",
                     customdata=[[row['P-value'], row['Sig Star']]]
                 )
             )
@@ -505,14 +513,14 @@ class GraphGenerator:
                 # Check the per-bar significance toggle state
                 sig_key = f"show_sig_{gene}_{row['Condition']}"
                 if settings.get(sig_key, True) and row['Sig Star']:
-                    # Calculate position slightly above the error bar end
-                    # Use the per-bar show_error setting to calculate y_pos correctly
+                    
                     per_bar_show_error = settings.get(f"show_error_{gene}_{row['Condition']}", True)
                     
                     if per_bar_show_error:
+                        # Position above error bar
                         y_pos = row['Fold Change'] + (row['SEM'] * settings.get('error_multiplier', 1.96) * 1.05)
                     else:
-                        # If no error bar, place slightly above the bar itself
+                        # Position slightly above the bar
                         y_pos = row['Fold Change'] * 1.05
                     
                     fig.add_annotation(
@@ -531,8 +539,8 @@ class GraphGenerator:
         else:
             y_min = settings.get('y_min', 0)
             y_max = settings.get('y_max')
+            # Log scale is disabled by requirement, but keeping the logic for robustness
             if settings.get('y_log_scale', False):
-                # Apply log transformation to the min/max values if log scale is enabled
                 y_range = [np.log10(y_min) if y_min > 0 else 0, np.log10(y_max)]
             else:
                 y_range = [y_min, y_max]
@@ -592,7 +600,6 @@ class GraphGenerator:
         )
 
         return fig
-
 
 # ==================== EXPORT FUNCTIONS ====================
 def export_to_excel(raw_data: pd.DataFrame, processed_data: Dict[str, pd.DataFrame], 
@@ -1158,6 +1165,12 @@ with tab4:
             gene_settings = st.session_state.gene_customizations[gene] 
             efficacy_config = EFFICACY_CONFIG.get(st.session_state.selected_efficacy, {})
             gene_data = st.session_state.processed_data[gene]
+            
+            # --- Safely check for 'Condition' column to prevent crash if data is empty/malformed ---
+            if 'Condition' not in gene_data.columns:
+                 st.warning(f"⚠️ Skipping graph for **{gene}**: Data is missing the 'Condition' column. Please check the uploaded data and analysis settings.")
+                 continue
+
             conditions = gene_data['Condition'].unique()
             
             

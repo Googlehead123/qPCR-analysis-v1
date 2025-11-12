@@ -766,102 +766,73 @@ with tab2:
 
 # ==================== TAB 3: ANALYSIS ====================
 with tab3:
-    st.header("Step 3: Gene-by-Gene Analysis")
-    
-    if st.session_state.data is not None and st.session_state.sample_mapping and st.session_state.hk_gene:
-        config = EFFICACY_CONFIG.get(st.session_state.selected_efficacy, {})
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            # Select reference sample (what treatments are relative to)
-            ref_samples = [k for k, v in st.session_state.sample_mapping.items() 
-                          if v['group'] == 'Negative Control']
-            if not ref_samples and 'baseline' in config.get('controls', {}):
-                ref_samples = [k for k, v in st.session_state.sample_mapping.items() 
-                              if v['group'] == 'Baseline']
-            
-            ref_sample = st.selectbox(
-                "Reference Sample (Fold change = 1.0)",
-                ref_samples if ref_samples else list(st.session_state.sample_mapping.keys())
-            )
-            ref_condition = st.session_state.sample_mapping[ref_sample]['condition']
-        
-        with col2:
-            # Select comparison control (for p-value calculation)
-            compare_samples = [k for k, v in st.session_state.sample_mapping.items() 
-                             if v['group'] == 'Negative Control']
-            compare_sample = st.selectbox(
-                "Compare To (for p-values)",
-                compare_samples if compare_samples else list(st.session_state.sample_mapping.keys())
-            )
-            compare_condition = st.session_state.sample_mapping[compare_sample]['condition']
-        
-        st.info(f"📊 Analysis setup: All fold changes relative to **{ref_condition}**, p-values vs **{compare_condition}**")
-        
-        if st.button("🔬 Run Gene-by-Gene Analysis", type="primary"):
-            with st.spinner("Analyzing each gene separately..."):
-                # Calculate ΔΔCt
-                processed = AnalysisEngine.calculate_ddct(
-                    st.session_state.data,
-                    st.session_state.hk_gene,
-                    ref_condition,
-                    compare_condition,
-                    st.session_state.excluded_wells,
-                    st.session_state.excluded_samples,
-                    st.session_state.sample_mapping
-                )
-                
-                if processed is not None and len(processed) > 0:
-                    # Calculate statistics
-                    processed = AnalysisEngine.calculate_statistics(processed, compare_condition)
-                    
-                    # Split by gene
-                    gene_data = {}
-                    for gene in processed['Target'].unique():
-                        gene_df = processed[processed['Target'] == gene].copy()
-                        gene_data[gene] = gene_df
-                    
-                    st.session_state.processed_data = gene_data
-                    st.success(f"✅ Analysis complete! {len(gene_data)} genes analyzed")
-        
-        # Display results
-        if st.session_state.processed_data:
-            st.subheader("📊 Analysis Results by Gene")
-            
-            # Overall summary
-            all_results = pd.concat(st.session_state.processed_data.values(), ignore_index=True)
-            col1, col2, col3, col4 = st.columns(4)
-            col1.metric("Genes Analyzed", len(st.session_state.processed_data))
-            col2.metric("Conditions", all_results['Condition'].nunique())
-            sig_count = (all_results['p_value'] < 0.05).sum()
-            col3.metric("Significant (p<0.05)", sig_count)
-            col4.metric("Total Comparisons", len(all_results))
-            
-            # Gene-by-gene tables
-            for gene, gene_df in st.session_state.processed_data.items():
-                with st.expander(f"🧬 {gene} - Detailed Results", expanded=True):
-                    # Show expected direction if available
-                    config = EFFICACY_CONFIG.get(st.session_state.selected_efficacy, {})
-                    if 'expected_direction' in config and gene in config['expected_direction']:
-                        direction = config['expected_direction'][gene]
-                        st.caption(f"Expected: {'↑ Increase' if direction == 'up' else '↓ Decrease'}")
-                    
-                    display_cols = ['Condition', 'Group', 'Fold_Change', 'p_value', 'significance', 
-                                  'n_replicates', 'Target_Ct_Mean', 'SEM']
-                    
-                    styled_df = gene_df[display_cols].style.background_gradient(
-                        subset=['Fold_Change'], cmap='RdYlGn', vmin=0, vmax=3
-                    ).format({
-                        'Fold_Change': '{:.3f}',
-                        'p_value': '{:.4f}',
-                        'Target_Ct_Mean': '{:.2f}',
-                        'SEM': '{:.3f}'
-                    })
-                    
-                    st.dataframe(styled_df, use_container_width=True)
+    st.header("📊 Visualization")
+
+    if "processed_data" not in st.session_state or not st.session_state.processed_data:
+        st.info("Run analysis first to visualize results.")
     else:
-        st.warning("⚠️ Complete previous steps first")
+        st.markdown("Fine-tune your visualization below or interact directly with the charts.")
+        st.divider()
+
+        # --- Global Visualization Controls ---
+        with st.expander("🎨 Global Display Settings", expanded=False):
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.session_state.graph_settings["color_scheme"] = st.selectbox(
+                    "Color Theme",
+                    ["plotly_white", "plotly_dark", "ggplot2", "seaborn", "simple_white"],
+                    index=0
+                )
+                st.session_state.graph_settings["show_error"] = st.checkbox("Show Error Bars", True)
+                st.session_state.graph_settings["show_significance"] = st.checkbox("Show Significance Marks", True)
+            with col2:
+                st.session_state.graph_settings["y_log_scale"] = st.checkbox("Log Scale (Y-axis)", False)
+                st.session_state.graph_settings["show_grid"] = st.checkbox("Show Grid", True)
+                st.session_state.graph_settings["bar_gap"] = st.slider("Bar Gap", 0.0, 0.5, 0.15)
+            with col3:
+                st.session_state.graph_settings["font_size"] = st.slider("Font Size", 10, 20, 14)
+                st.session_state.graph_settings["figure_height"] = st.slider("Figure Height", 400, 1000, 600)
+                st.session_state.graph_settings["figure_width"] = st.slider("Figure Width", 600, 1200, 900)
+
+        st.divider()
+
+        # --- Per-Gene Visualization ---
+        for gene, gene_df in st.session_state.processed_data.items():
+            with st.container(border=True):
+                st.markdown(f"### 🧬 {gene}")
+                col_left, col_right = st.columns([1.1, 3.9])
+
+                with col_left:
+                    # color picker and visibility toggles
+                    st.session_state.graph_settings["bar_colors"].setdefault(
+                        gene, px.colors.qualitative.Plotly[len(st.session_state.graph_settings["bar_colors"]) % 10]
+                    )
+                    color = st.color_picker("Bar Color", st.session_state.graph_settings["bar_colors"][gene], key=f"color_{gene}")
+                    st.session_state.graph_settings["bar_colors"][gene] = color
+
+                    # per-sample controls
+                    st.markdown("**Visible Conditions**")
+                    conds = gene_df["Condition"].unique().tolist()
+                    visible_conditions = []
+                    for cond in conds:
+                        include = st.checkbox(cond, True, key=f"show_{gene}_{cond}")
+                        if include:
+                            visible_conditions.append(cond)
+
+                    # subset gene_df by visible conditions
+                    gene_filtered = gene_df[gene_df["Condition"].isin(visible_conditions)]
+
+                with col_right:
+                    # Plot the gene graph live
+                    fig = GraphGenerator.create_gene_graph(
+                        gene_filtered,
+                        gene,
+                        st.session_state.graph_settings,
+                        efficacy_config=None,
+                        sample_order=st.session_state.get("sample_order", None)
+                    )
+
+                    st.plotly_chart(fig, use_container_width=True, key=f"graph_{gene}")
 
 # ==================== TAB 4: GRAPHS ====================
 with tab4:
@@ -1100,8 +1071,8 @@ with tab5:
             'Date': datetime.now().strftime("%Y-%m-%d %H:%M"),
             'Efficacy_Type': st.session_state.selected_efficacy,
             'Housekeeping_Gene': st.session_state.hk_gene,
-            'Reference_Sample': ref_condition if 'ref_condition' in locals() else 'N/A',
-            'Compare_To': compare_condition if 'compare_condition' in locals() else 'N/A',
+            'Reference_Sample': 'ref_condition' if 'ref_condition' in locals() else 'N/A',
+            'Compare_To': 'compare_condition' if 'compare_condition' in locals() else 'N/A',
             'Excluded_Wells': len(st.session_state.excluded_wells),
             'Excluded_Samples': len(st.session_state.excluded_samples),
             'Genes_Analyzed': len(st.session_state.processed_data)

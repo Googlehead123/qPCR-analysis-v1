@@ -594,24 +594,49 @@ class GraphGenerator:
             if len(y_range) == 2:
                 y_axis_config['range'] = y_range
         
+        # Get gene-specific settings (fallback to global)
+        gene_bar_gap = settings.get(f"{gene}_bar_gap", settings.get('bar_gap', 0.15))
+        gene_margins = settings.get(f"{gene}_margins", {'l': 80, 'r': 80, 't': 100, 'b': 100})
+        gene_bg_color = settings.get(f"{gene}_bg_color", settings.get('plot_bgcolor', '#FFFFFF'))
+        gene_grid_color = settings.get(f"{gene}_grid_color", '#E5E5E5')
+        gene_grid_width = settings.get(f"{gene}_grid_width", 1)
+        gene_xlabel_size = settings.get(f"{gene}_xlabel_size", 14)
+        gene_ylabel_size = settings.get(f"{gene}_ylabel_size", 14)
+        gene_xlabel_color = settings.get(f"{gene}_xlabel_color", '#000000')
+        gene_ylabel_color = settings.get(f"{gene}_ylabel_color", '#000000')
+        gene_tick_size = settings.get(f"{gene}_tick_size", 12)
+        gene_tick_angle = settings.get(f"{gene}_tick_angle", -45)
+        
         fig.update_layout(
             title=dict(
                 text=f"{gene} Expression",
                 font=dict(size=settings.get('title_size', 20))
             ),
             xaxis=dict(
-                title=settings.get('xlabel', 'Condition'),
+                title=dict(
+                    text=settings.get('xlabel', 'Condition'),
+                    font=dict(size=gene_xlabel_size, color=gene_xlabel_color)
+                ),
                 showgrid=settings.get('show_grid', True),
-                gridcolor='lightgray',
-                tickangle=-45
+                gridcolor=gene_grid_color,
+                gridwidth=gene_grid_width,
+                tickangle=gene_tick_angle,
+                tickfont=dict(size=gene_tick_size)
             ),
             yaxis=y_axis_config,
             template=settings.get('color_scheme', 'plotly_white'),
             font=dict(size=settings.get('font_size', 14)),
             height=settings.get('figure_height', 600),
             width=settings.get('figure_width', 1000),
-            bargap=settings.get('bar_gap', 0.15),
-            showlegend=settings.get('show_legend', False)
+            bargap=gene_bar_gap,
+            showlegend=settings.get('show_legend', False),
+            plot_bgcolor=gene_bg_color,
+            margin=dict(
+                l=gene_margins['l'],
+                r=gene_margins['r'],
+                t=gene_margins['t'],
+                b=gene_margins['b']
+            )
         )
         
         return fig
@@ -1275,6 +1300,209 @@ with tab4:
                             if custom_key in st.session_state.graph_settings['bar_colors_per_sample']:
                                 del st.session_state.graph_settings['bar_colors_per_sample'][custom_key]
                             st.rerun()
+            # ADD THIS NEW EXPANDER for detailed graph controls
+            with st.expander(f"⚙️ Advanced {gene} Settings", expanded=False):
+                st.markdown("#### 📐 Layout & Spacing")
+                
+                col_layout1, col_layout2, col_layout3 = st.columns(3)
+                
+                with col_layout1:
+                    # Bar spacing
+                    bar_gap_key = f"{gene}_bar_gap"
+                    if bar_gap_key not in st.session_state.graph_settings:
+                        st.session_state.graph_settings[bar_gap_key] = 0.15
+                    
+                    st.session_state.graph_settings[bar_gap_key] = st.slider(
+                        "Bar Gap (spacing)",
+                        0.0, 0.5,
+                        st.session_state.graph_settings[bar_gap_key],
+                        0.01,
+                        key=f"gap_{gene}",
+                        help="Space between bars"
+                    )
+                    
+                    # Bar width
+                    bar_width_key = f"{gene}_bar_width"
+                    if bar_width_key not in st.session_state.graph_settings:
+                        st.session_state.graph_settings[bar_width_key] = 0.8
+                    
+                    st.session_state.graph_settings[bar_width_key] = st.slider(
+                        "Bar Width",
+                        0.1, 1.5,
+                        st.session_state.graph_settings[bar_width_key],
+                        0.05,
+                        key=f"width_{gene}"
+                    )
+                
+                with col_layout2:
+                    # Margin controls
+                    st.markdown("**Plot Margins (px)**")
+                    
+                    margin_key = f"{gene}_margins"
+                    if margin_key not in st.session_state.graph_settings:
+                        st.session_state.graph_settings[margin_key] = {'l': 80, 'r': 80, 't': 100, 'b': 100}
+                    
+                    margins = st.session_state.graph_settings[margin_key]
+                    margins['l'] = st.number_input("Left", 0, 200, margins['l'], key=f"ml_{gene}")
+                    margins['r'] = st.number_input("Right", 0, 200, margins['r'], key=f"mr_{gene}")
+                    margins['t'] = st.number_input("Top", 0, 200, margins['t'], key=f"mt_{gene}")
+                    margins['b'] = st.number_input("Bottom", 0, 200, margins['b'], key=f"mb_{gene}")
+                
+                with col_layout3:
+                    # Background & grid
+                    st.markdown("**Background & Grid**")
+                    
+                    bg_color_key = f"{gene}_bg_color"
+                    if bg_color_key not in st.session_state.graph_settings:
+                        st.session_state.graph_settings[bg_color_key] = '#FFFFFF'
+                    
+                    st.session_state.graph_settings[bg_color_key] = st.color_picker(
+                        "Plot Background",
+                        st.session_state.graph_settings[bg_color_key],
+                        key=f"bg_{gene}"
+                    )
+                    
+                    grid_color_key = f"{gene}_grid_color"
+                    if grid_color_key not in st.session_state.graph_settings:
+                        st.session_state.graph_settings[grid_color_key] = '#E5E5E5'
+                    
+                    st.session_state.graph_settings[grid_color_key] = st.color_picker(
+                        "Grid Color",
+                        st.session_state.graph_settings[grid_color_key],
+                        key=f"grid_{gene}"
+                    )
+                    
+                    grid_width_key = f"{gene}_grid_width"
+                    if grid_width_key not in st.session_state.graph_settings:
+                        st.session_state.graph_settings[grid_width_key] = 1
+                    
+                    st.session_state.graph_settings[grid_width_key] = st.slider(
+                        "Grid Line Width",
+                        0, 5,
+                        st.session_state.graph_settings[grid_width_key],
+                        key=f"gwidth_{gene}"
+                    )
+                
+                st.markdown("---")
+                st.markdown("#### 🔤 Text Formatting")
+                
+                col_text1, col_text2, col_text3 = st.columns(3)
+                
+                with col_text1:
+                    # X-axis label controls
+                    st.markdown("**X-Axis Label**")
+                    
+                    xlabel_size_key = f"{gene}_xlabel_size"
+                    if xlabel_size_key not in st.session_state.graph_settings:
+                        st.session_state.graph_settings[xlabel_size_key] = 14
+                    
+                    st.session_state.graph_settings[xlabel_size_key] = st.slider(
+                        "Size",
+                        8, 24,
+                        st.session_state.graph_settings[xlabel_size_key],
+                        key=f"xlsize_{gene}"
+                    )
+                    
+                    xlabel_color_key = f"{gene}_xlabel_color"
+                    if xlabel_color_key not in st.session_state.graph_settings:
+                        st.session_state.graph_settings[xlabel_color_key] = '#000000'
+                    
+                    st.session_state.graph_settings[xlabel_color_key] = st.color_picker(
+                        "Color",
+                        st.session_state.graph_settings[xlabel_color_key],
+                        key=f"xlcolor_{gene}"
+                    )
+                
+                with col_text2:
+                    # Y-axis label controls
+                    st.markdown("**Y-Axis Label**")
+                    
+                    ylabel_size_key = f"{gene}_ylabel_size"
+                    if ylabel_size_key not in st.session_state.graph_settings:
+                        st.session_state.graph_settings[ylabel_size_key] = 14
+                    
+                    st.session_state.graph_settings[ylabel_size_key] = st.slider(
+                        "Size",
+                        8, 24,
+                        st.session_state.graph_settings[ylabel_size_key],
+                        key=f"ylsize_{gene}"
+                    )
+                    
+                    ylabel_color_key = f"{gene}_ylabel_color"
+                    if ylabel_color_key not in st.session_state.graph_settings:
+                        st.session_state.graph_settings[ylabel_color_key] = '#000000'
+                    
+                    st.session_state.graph_settings[ylabel_color_key] = st.color_picker(
+                        "Color",
+                        st.session_state.graph_settings[ylabel_color_key],
+                        key=f"ylcolor_{gene}"
+                    )
+                
+                with col_text3:
+                    # Tick label controls
+                    st.markdown("**Tick Labels**")
+                    
+                    tick_size_key = f"{gene}_tick_size"
+                    if tick_size_key not in st.session_state.graph_settings:
+                        st.session_state.graph_settings[tick_size_key] = 12
+                    
+                    st.session_state.graph_settings[tick_size_key] = st.slider(
+                        "Size",
+                        6, 20,
+                        st.session_state.graph_settings[tick_size_key],
+                        key=f"ticksize_{gene}"
+                    )
+                    
+                    tick_angle_key = f"{gene}_tick_angle"
+                    if tick_angle_key not in st.session_state.graph_settings:
+                        st.session_state.graph_settings[tick_angle_key] = -45
+                    
+                    st.session_state.graph_settings[tick_angle_key] = st.slider(
+                        "X-Tick Angle",
+                        -90, 90,
+                        st.session_state.graph_settings[tick_angle_key],
+                        key=f"tickang_{gene}"
+                    )
+                
+                st.markdown("---")
+                st.markdown("#### ⭐ Significance Stars")
+                
+                col_sig1, col_sig2, col_sig3 = st.columns(3)
+                
+                with col_sig1:
+                    sig_size_key = f"{gene}_sig_size"
+                    if sig_size_key not in st.session_state.graph_settings:
+                        st.session_state.graph_settings[sig_size_key] = 16
+                    
+                    st.session_state.graph_settings[sig_size_key] = st.slider(
+                        "Star Size",
+                        8, 32,
+                        st.session_state.graph_settings[sig_size_key],
+                        key=f"sigsize_{gene}"
+                    )
+                
+                with col_sig2:
+                    sig_color_key = f"{gene}_sig_color"
+                    if sig_color_key not in st.session_state.graph_settings:
+                        st.session_state.graph_settings[sig_color_key] = '#000000'
+                    
+                    st.session_state.graph_settings[sig_color_key] = st.color_picker(
+                        "Star Color",
+                        st.session_state.graph_settings[sig_color_key],
+                        key=f"sigcolor_{gene}"
+                    )
+                
+                with col_sig3:
+                    sig_pos_key = f"{gene}_sig_position"
+                    if sig_pos_key not in st.session_state.graph_settings:
+                        st.session_state.graph_settings[sig_pos_key] = 'outside'
+                    
+                    st.session_state.graph_settings[sig_pos_key] = st.selectbox(
+                        "Position",
+                        ['outside', 'inside', 'auto'],
+                        index=['outside', 'inside', 'auto'].index(st.session_state.graph_settings[sig_pos_key]),
+                        key=f"sigpos_{gene}"
+                    )
             
             # Generate graph
             gene_data = st.session_state.processed_data[gene]

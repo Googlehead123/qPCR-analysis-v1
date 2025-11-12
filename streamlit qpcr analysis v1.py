@@ -477,20 +477,37 @@ class GraphGenerator:
                 )
                 gene_data = gene_data.sort_values(['group_sort', 'Condition'])
         
-        # Get colors
-        if 'Group' in gene_data.columns:
-            default_color = settings.get('bar_colors', {}).get(gene, '#4ECDC4')
-            color_map = {
-                'Baseline': '#808080',
-                'Negative Control': '#FF6B6B',
-                'Positive Control': '#4ECDC4',
-                'Treatment': default_color
-            }
-            bar_colors = [color_map.get(g, default_color) for g in gene_data['Group']]
-        else:
-            default_color = settings.get('bar_colors', {}).get(gene, '#4ECDC4')
-            bar_colors = [default_color] * len(gene_data)
+        # Get colors - Grey tones for controls, custom for treatments
+        # Check for per-sample custom colors first
+        bar_colors = []
         
+        # Standard grey-tone palette for controls
+        control_colors = {
+            'Baseline': '#E8E8E8',           # Very light grey (non-treated)
+            'Non-treated': '#E8E8E8',        # Very light grey
+            'Control': '#E8E8E8',            # Very light grey
+            'Negative Control': '#BDBDBD',   # Medium grey
+            'Inducer': '#BDBDBD',            # Medium grey (for α-MSH, IGF, etc)
+            'Positive Control': '#757575',   # Dark grey
+            'Treatment': None                # Will use custom color
+        }
+        
+        for idx, row in gene_data.iterrows():
+            condition = row['Condition']
+            group = row.get('Group', 'Treatment')
+            
+            # Check if user has set a custom color for this specific bar
+            custom_key = f"{gene}_{condition}"
+            if custom_key in settings.get('bar_colors_per_sample', {}):
+                bar_colors.append(settings['bar_colors_per_sample'][custom_key])
+            # Use control grey tones
+            elif group in control_colors and control_colors[group] is not None:
+                bar_colors.append(control_colors[group])
+            # Use gene default color for treatments
+            else:
+                default_color = settings.get('bar_colors', {}).get(gene, '#4ECDC4')
+                bar_colors.append(default_color)
+                
         # Get significance text
         sig_text = gene_data.get('significance', [''] * len(gene_data))
         
@@ -1025,36 +1042,89 @@ with tab4:
         for gene in st.session_state.processed_data.keys():
             st.markdown(f"### 🧬 {gene}")
             
-            # Gene-specific color
+            # Initialize per-sample colors if not exists
+            if 'bar_colors_per_sample' not in st.session_state.graph_settings:
+                st.session_state.graph_settings['bar_colors_per_sample'] = {}
+            
+            # Gene-specific color (default for treatments)
             if gene not in st.session_state.graph_settings['bar_colors']:
                 default_colors = px.colors.qualitative.Plotly
                 idx = list(st.session_state.processed_data.keys()).index(gene)
                 st.session_state.graph_settings['bar_colors'][gene] = default_colors[idx % len(default_colors)]
             
-            col_color, col_graph = st.columns([1, 4])
-            
-            with col_color:
+            # Expandable color customization panel
+            with st.expander(f"🎨 Customize {gene} Colors", expanded=False):
+                st.markdown("**Default Treatment Color:**")
                 st.session_state.graph_settings['bar_colors'][gene] = st.color_picker(
-                    f"{gene} color",
+                    "Default color for treatment samples",
                     st.session_state.graph_settings['bar_colors'][gene],
-                    key=f"color_{gene}"
+                    key=f"default_color_{gene}"
                 )
-            
-            with col_graph:
-                # Generate graph
+                
+                st.markdown("---")
+                st.markdown("**Individual Bar Colors (override defaults):**")
+                st.caption("Controls default to grey tones. Customize any bar below:")
+                
+                # Get all conditions for this gene
                 gene_data = st.session_state.processed_data[gene]
                 
-                fig = GraphGenerator.create_gene_graph(
-                    gene_data,
-                    gene,
-                    st.session_state.graph_settings,
-                    efficacy_config,
-                    sample_order=st.session_state.get('sample_order'),
-                    per_sample_overrides=None
-                )
-                
-                st.plotly_chart(fig, use_container_width=True, key=f"fig_{gene}")
-                st.session_state.graphs[gene] = fig
+                # Create color pickers for each condition
+                cols = st.columns(3)
+                for idx, (_, row) in enumerate(gene_data.iterrows()):
+                    condition = row['Condition']
+                    group = row.get('Group', 'Treatment')
+                    custom_key = f"{gene}_{condition}"
+                    
+                    with cols[idx % 3]:
+                        # Show current group type
+                        st.caption(f"**{condition}**")
+                        st.text(f"Group: {group}")
+                        
+                        # Get current color (default or custom)
+                        if custom_key in st.session_state.graph_settings['bar_colors_per_sample']:
+                            current_color = st.session_state.graph_settings['bar_colors_per_sample'][custom_key]
+                        else:
+                            # Show default based on group
+                            control_defaults = {
+                                'Baseline': '#E8E8E8',
+                                'Non-treated': '#E8E8E8',
+                                'Control': '#E8E8E8',
+                                'Negative Control': '#BDBDBD',
+                                'Inducer': '#BDBDBD',
+                                'Positive Control': '#757575',
+                                'Treatment': st.session_state.graph_settings['bar_colors'][gene]
+                            }
+                            current_color = control_defaults.get(group, st.session_state.graph_settings['bar_colors'][gene])
+                        
+                        # Color picker
+                        new_color = st.color_picker(
+                            f"Color",
+                            current_color,
+                            key=f"bar_color_{gene}_{condition}",
+                            label_visibility="collapsed"
+                        )
+                        st.session_state.graph_settings['bar_colors_per_sample'][custom_key] = new_color
+                        
+                        # Reset button
+                        if st.button("↺", key=f"reset_{gene}_{condition}", help="Reset to default"):
+                            if custom_key in st.session_state.graph_settings['bar_colors_per_sample']:
+                                del st.session_state.graph_settings['bar_colors_per_sample'][custom_key]
+                            st.rerun()
+            
+            # Generate graph
+            gene_data = st.session_state.processed_data[gene]
+            
+            fig = GraphGenerator.create_gene_graph(
+                gene_data,
+                gene,
+                st.session_state.graph_settings,
+                EFFICACY_CONFIG.get(st.session_state.selected_efficacy, {}),
+                sample_order=st.session_state.get('sample_order'),
+                per_sample_overrides=None
+            )
+            
+            st.plotly_chart(fig, use_container_width=True, key=f"fig_{gene}")
+            st.session_state.graphs[gene] = fig
             
             st.markdown("---")
     

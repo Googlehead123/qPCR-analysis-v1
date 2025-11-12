@@ -768,71 +768,132 @@ with tab2:
 with tab3:
     st.header("📊 Visualization")
 
-    if "processed_data" not in st.session_state or not st.session_state.processed_data:
+    # Guard: Require processed data
+    if "processed_data" not in st.session_state or st.session_state.processed_data is None:
         st.info("Run analysis first to visualize results.")
     else:
-        st.markdown("Fine-tune your visualization below or interact directly with the charts.")
         st.divider()
+        st.markdown("### ⚙️ Global Display Settings")
 
-        # --- Global Visualization Controls ---
-        with st.expander("🎨 Global Display Settings", expanded=False):
-            col1, col2, col3 = st.columns(3)
-            with col1:
+        # Initialize graph settings if missing
+        if "graph_settings" not in st.session_state:
+            st.session_state.graph_settings = {
+                "bar_colors": {},
+                "color_scheme": "plotly_white",
+                "show_error": True,
+                "show_significance": True,
+                "y_log_scale": False,
+                "show_grid": True,
+                "bar_gap": 0.15,
+                "font_size": 14,
+                "figure_height": 600,
+                "figure_width": 900
+            }
+
+        # --- Visualization Controls ---
+        with st.expander("🎨 Customize Global Graph Appearance", expanded=False):
+            c1, c2, c3 = st.columns(3)
+            with c1:
                 st.session_state.graph_settings["color_scheme"] = st.selectbox(
                     "Color Theme",
                     ["plotly_white", "plotly_dark", "ggplot2", "seaborn", "simple_white"],
-                    index=0
+                    index=0,
                 )
-                st.session_state.graph_settings["show_error"] = st.checkbox("Show Error Bars", True)
-                st.session_state.graph_settings["show_significance"] = st.checkbox("Show Significance Marks", True)
-            with col2:
-                st.session_state.graph_settings["y_log_scale"] = st.checkbox("Log Scale (Y-axis)", False)
-                st.session_state.graph_settings["show_grid"] = st.checkbox("Show Grid", True)
-                st.session_state.graph_settings["bar_gap"] = st.slider("Bar Gap", 0.0, 0.5, 0.15)
-            with col3:
-                st.session_state.graph_settings["font_size"] = st.slider("Font Size", 10, 20, 14)
-                st.session_state.graph_settings["figure_height"] = st.slider("Figure Height", 400, 1000, 600)
-                st.session_state.graph_settings["figure_width"] = st.slider("Figure Width", 600, 1200, 900)
+                st.session_state.graph_settings["show_error"] = st.checkbox(
+                    "Show Error Bars", value=True
+                )
+                st.session_state.graph_settings["show_significance"] = st.checkbox(
+                    "Show Significance", value=True
+                )
+            with c2:
+                st.session_state.graph_settings["y_log_scale"] = st.checkbox(
+                    "Use Log Scale (Y)", value=False
+                )
+                st.session_state.graph_settings["show_grid"] = st.checkbox(
+                    "Show Grid", value=True
+                )
+                st.session_state.graph_settings["bar_gap"] = st.slider(
+                    "Bar Gap", 0.0, 0.5, 0.15
+                )
+            with c3:
+                st.session_state.graph_settings["font_size"] = st.slider(
+                    "Font Size", 10, 24, 14
+                )
+                st.session_state.graph_settings["figure_height"] = st.slider(
+                    "Height", 400, 1200, 600
+                )
+                st.session_state.graph_settings["figure_width"] = st.slider(
+                    "Width", 600, 1200, 900
+                )
 
         st.divider()
 
-        # --- Per-Gene Visualization ---
-        for gene, gene_df in st.session_state.processed_data.items():
-            with st.container(border=True):
-                st.markdown(f"### 🧬 {gene}")
-                col_left, col_right = st.columns([1.1, 3.9])
+        # --- Data preparation ---
+        data = st.session_state.processed_data
 
-                with col_left:
-                    # color picker and visibility toggles
-                    st.session_state.graph_settings["bar_colors"].setdefault(
-                        gene, px.colors.qualitative.Plotly[len(st.session_state.graph_settings["bar_colors"]) % 10]
-                    )
-                    color = st.color_picker("Bar Color", st.session_state.graph_settings["bar_colors"][gene], key=f"color_{gene}")
-                    st.session_state.graph_settings["bar_colors"][gene] = color
+        # Handle both dict-of-genes or single DataFrame
+        if isinstance(data, dict):
+            all_genes = list(data.keys())
+        else:
+            if "Target" in data.columns:
+                all_genes = sorted(data["Target"].dropna().unique().tolist())
+            else:
+                st.error("No 'Target' column found in processed data.")
+                st.stop()
 
-                    # per-sample controls
-                    st.markdown("**Visible Conditions**")
-                    conds = gene_df["Condition"].unique().tolist()
-                    visible_conditions = []
-                    for cond in conds:
-                        include = st.checkbox(cond, True, key=f"show_{gene}_{cond}")
-                        if include:
-                            visible_conditions.append(cond)
+        selected_genes = st.multiselect(
+            "🧬 Select Genes to Visualize",
+            all_genes,
+            default=all_genes[: min(3, len(all_genes))],
+        )
 
-                    # subset gene_df by visible conditions
-                    gene_filtered = gene_df[gene_df["Condition"].isin(visible_conditions)]
+        st.divider()
 
-                with col_right:
-                    # Plot the gene graph live
-                    fig = GraphGenerator.create_gene_graph(
-                        gene_filtered,
-                        gene,
-                        st.session_state.graph_settings,
-                        efficacy_config=None,
-                        sample_order=st.session_state.get("sample_order", None)
-                    )
+        # --- Draw selected gene graphs ---
+        for gene in selected_genes:
+            st.markdown(f"### **{gene}**")
 
-                    st.plotly_chart(fig, use_container_width=True, key=f"graph_{gene}")
+            # get data per gene
+            if isinstance(data, dict):
+                df = data[gene]
+            else:
+                df = data[data["Target"] == gene].copy()
+
+            if df.empty:
+                st.warning(f"No data available for {gene}")
+                continue
+
+            # choose conditions to display
+            conds = df["Condition"].unique().tolist()
+            visible = [
+                c
+                for c in conds
+                if st.checkbox(f"Show {c}", value=True, key=f"chk_{gene}_{c}")
+            ]
+            df_filtered = df[df["Condition"].isin(visible)]
+
+            # choose color
+            if gene not in st.session_state.graph_settings["bar_colors"]:
+                st.session_state.graph_settings["bar_colors"][gene] = px.colors.qualitative.Plotly[
+                    len(st.session_state.graph_settings["bar_colors"]) % 10
+                ]
+            color = st.color_picker(
+                "Bar Color",
+                st.session_state.graph_settings["bar_colors"][gene],
+                key=f"color_{gene}",
+            )
+            st.session_state.graph_settings["bar_colors"][gene] = color
+
+            # create figure
+            fig = GraphGenerator.create_gene_graph(
+                df_filtered,
+                gene,
+                st.session_state.graph_settings,
+                sample_order=st.session_state.get("sample_order", None),
+            )
+
+            st.plotly_chart(fig, use_container_width=True, key=f"fig_{gene}")
+            st.divider()
 
 # ==================== TAB 4: GRAPHS ====================
 with tab4:

@@ -865,141 +865,64 @@ with tab2:
             
 # ==================== TAB 3: ANALYSIS ====================
 with tab3:
-    st.header("📊 Visualization")
-
-    # Guard: Require processed data
-    if "processed_daat" not in st.session_state or st.session_state.processed_data is None:
-        st.info("Run analysis first to visualize results.")
+    st.header("Step 3: Analysis Results")
+    
+    if st.session_state.processed_data:
+        st.subheader("📊 Analysis Summary")
+        
+        # Summary metrics
+        all_results = pd.concat(st.session_state.processed_data.values(), ignore_index=True)
+        
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Genes Analyzed", len(st.session_state.processed_data))
+        col2.metric("Conditions", all_results['Condition'].nunique())
+        sig_count = (all_results['p_value'] < 0.05).sum()
+        col3.metric("Significant (p<0.05)", f"{sig_count}/{len(all_results)}")
+        
+        # Show results per gene
+        st.subheader("🧬 Gene-by-Gene Results")
+        
+        for gene, gene_df in st.session_state.processed_data.items():
+            with st.expander(f"📍 {gene}", expanded=False):
+                # Show expected direction if available
+                efficacy_config = EFFICACY_CONFIG.get(st.session_state.selected_efficacy, {})
+                if 'expected_direction' in efficacy_config:
+                    direction = efficacy_config['expected_direction'].get(gene)
+                    if direction:
+                        st.caption(f"Expected: {'↑ Increase' if direction == 'up' else '↓ Decrease'}")
+                
+                # Display columns
+                display_cols = ['Condition', 'Group', 'Fold_Change', 'p_value', 'significance', 
+                              'n_replicates', 'Target_Ct_Mean', 'HK_Ct_Mean', 'Delta_Ct', 'SEM']
+                
+                # Filter to existing columns
+                display_df = gene_df[[c for c in display_cols if c in gene_df.columns]]
+                
+                # Style the dataframe
+                styled = display_df.style.background_gradient(
+                    subset=['Fold_Change'], cmap='RdYlGn', vmin=0, vmax=3
+                ).format({
+                    'Fold_Change': '{:.3f}',
+                    'p_value': '{:.4f}',
+                    'Target_Ct_Mean': '{:.2f}',
+                    'HK_Ct_Mean': '{:.2f}',
+                    'Delta_Ct': '{:.2f}',
+                    'SEM': '{:.3f}'
+                }, na_rep='—')
+                
+                st.dataframe(styled, use_container_width=True)
+        
+        st.success("✅ Results ready! Go to Graphs tab to visualize.")
+    
     else:
-        st.divider()
-        st.markdown("### ⚙️ Global Display Settings")
-
-        # Initialize graph settings if missing
-        if "graph_settings" not in st.session_state:
-            st.session_state.graph_settings = {
-                "bar_colors": {},
-                "color_scheme": "plotly_white",
-                "show_error": True,
-                "show_significance": True,
-                "y_log_scale": False,
-                "show_grid": True,
-                "bar_gap": 0.15,
-                "font_size": 14,
-                "figure_height": 600,
-                "figure_width": 900
-            }
-
-        # --- Visualization Controls ---
-        with st.expander("🎨 Customize Global Graph Appearance", expanded=False):
-            c1, c2, c3 = st.columns(3)
-            with c1:
-                st.session_state.graph_settings["color_scheme"] = st.selectbox(
-                    "Color Theme",
-                    ["plotly_white", "plotly_dark", "ggplot2", "seaborn", "simple_white"],
-                    index=0,
-                )
-                st.session_state.graph_settings["show_error"] = st.checkbox(
-                    "Show Error Bars", value=True
-                )
-                st.session_state.graph_settings["show_significance"] = st.checkbox(
-                    "Show Significance", value=True
-                )
-            with c2:
-                st.session_state.graph_settings["y_log_scale"] = st.checkbox(
-                    "Use Log Scale (Y)", value=False
-                )
-                st.session_state.graph_settings["show_grid"] = st.checkbox(
-                    "Show Grid", value=True
-                )
-                st.session_state.graph_settings["bar_gap"] = st.slider(
-                    "Bar Gap", 0.0, 0.5, 0.15
-                )
-            with c3:
-                st.session_state.graph_settings["font_size"] = st.slider(
-                    "Font Size", 10, 24, 14
-                )
-                st.session_state.graph_settings["figure_height"] = st.slider(
-                    "Height", 400, 1200, 600
-                )
-                st.session_state.graph_settings["figure_width"] = st.slider(
-                    "Width", 600, 1200, 900
-                )
-
-        st.divider()
-
-        # --- Data preparation ---
-        data = st.session_state.processed_data
-
-        # Handle both dict-of-genes or single DataFrame
-        if isinstance(data, dict):
-            all_genes = list(data.keys())
-        else:
-            if "Target" in data.columns:
-                all_genes = sorted(data["Target"].dropna().unique().tolist())
-            else:
-                st.error("No 'Target' column found in processed data.")
-                st.stop()
-
-        selected_genes = st.multiselect(
-            "🧬 Select Genes to Visualize",
-            all_genes,
-            default=all_genes[: min(3, len(all_genes))],
-        )
-
-        st.divider()
-
-        # --- Draw selected gene graphs ---
-        for gene in selected_genes:
-            st.markdown(f"### **{gene}**")
-
-            # get data per gene
-            if isinstance(data, dict):
-                df = data[gene]
-            else:
-                df = data[data["Target"] == gene].copy()
-
-            if df.empty:
-                st.warning(f"No data available for {gene}")
-                continue
-
-            # choose conditions to display
-            conds = df["Condition"].unique().tolist()
-            visible = [
-                c
-                for c in conds
-                if st.checkbox(f"Show {c}", value=True, key=f"chk_{gene}_{c}")
-            ]
-            df_filtered = df[df["Condition"].isin(visible)]
-
-            # choose color
-            if gene not in st.session_state.graph_settings["bar_colors"]:
-                st.session_state.graph_settings["bar_colors"][gene] = px.colors.qualitative.Plotly[
-                    len(st.session_state.graph_settings["bar_colors"]) % 10
-                ]
-            color = st.color_picker(
-                "Bar Color",
-                st.session_state.graph_settings["bar_colors"][gene],
-                key=f"color_{gene}",
-            )
-            st.session_state.graph_settings["bar_colors"][gene] = color
-
-            # create figure
-            fig = GraphGenerator.create_gene_graph(
-                df_filtered,
-                gene,
-                st.session_state.graph_settings,
-                sample_order=st.session_state.get("sample_order", None),
-            )
-
-            st.plotly_chart(fig, use_container_width=True, key=f"fig_{gene}")
-            st.divider()
-
+        st.info("⏳ No analysis results yet. Go to 'Sample Mapping' tab and click 'Run Full Analysis Now'")
+        
 # ==================== TAB 4: GRAPHS ====================
 with tab4:
     st.header("Step 4: Individual Gene Graphs")
     
     if st.session_state.processed_data:
-        # Initialize graph settings (extend with new options)
+        # Initialize graph settings
         if 'graph_settings' not in st.session_state:
             st.session_state.graph_settings = {
                 'title_size': 20, 'font_size': 14, 'sig_font_size': 16,
@@ -1007,117 +930,99 @@ with tab4:
                 'color_scheme': 'plotly_white', 'show_error': True,
                 'show_significance': True, 'show_grid': True,
                 'xlabel': 'Condition', 'ylabel': 'Fold Change (Relative to Control)',
-                'bar_colors': {},
-                # NEW options
-                'orientation': 'v',  # 'v' or 'h'
-                'error_multiplier': 1.96,
-                'bar_opacity': 0.95,
-                'bar_gap': 0.15,
-                'marker_line_width': 1,
-                'show_legend': False,
-                'y_log_scale': False,
-                'y_min': None,
-                'y_max': None
+                'bar_colors': {}, 'orientation': 'v', 'error_multiplier': 1.96,
+                'bar_opacity': 0.95, 'bar_gap': 0.15, 'marker_line_width': 1,
+                'show_legend': False, 'y_log_scale': False, 'y_min': None, 'y_max': None
             }
-
+        
         # Global settings
         st.subheader("⚙️ Global Graph Settings")
-
-        # layout widgets in groups for clarity
+        
         col1, col2, col3, col4 = st.columns(4)
         with col1:
-            st.session_state.graph_settings['font_size'] = st.slider("Font Size", 8, 28, st.session_state.graph_settings['font_size'])
-            st.session_state.graph_settings['title_size'] = st.slider("Title Size", 10, 36, st.session_state.graph_settings['title_size'])
-            st.session_state.graph_settings['sig_font_size'] = st.slider("Significance Font Size", 8, 28, st.session_state.graph_settings['sig_font_size'])
-        with col2:
-            st.session_state.graph_settings['figure_width'] = st.slider("Width (px)", 600, 2000, st.session_state.graph_settings['figure_width'])
-            st.session_state.graph_settings['figure_height'] = st.slider("Height (px)", 300, 1400, st.session_state.graph_settings['figure_height'])
-            st.session_state.graph_settings['orientation'] = st.selectbox("Bar Orientation", ['v', 'h'], index=0 if st.session_state.graph_settings['orientation']=='v' else 1)
-        with col3:
-            st.session_state.graph_settings['color_scheme'] = st.selectbox(
-                "Theme", ['plotly_white', 'plotly', 'plotly_dark', 'seaborn', 'simple_white', 'presentation'],
-                index=0 if st.session_state.graph_settings.get('color_scheme','plotly_white')=='plotly_white' else 0
+            st.session_state.graph_settings['font_size'] = st.slider(
+                "Font Size", 8, 28, st.session_state.graph_settings['font_size'], key='global_font'
             )
-            st.session_state.graph_settings['show_legend'] = st.checkbox("Show Legend", st.session_state.graph_settings.get('show_legend', False))
-            st.session_state.graph_settings['show_grid'] = st.checkbox("Grid", st.session_state.graph_settings.get('show_grid', True))
-        with col4:
-            st.session_state.graph_settings['show_error'] = st.checkbox("Error Bars", st.session_state.graph_settings.get('show_error', True))
-            st.session_state.graph_settings['show_significance'] = st.checkbox("Significance", st.session_state.graph_settings.get('show_significance', True))
-            st.session_state.graph_settings['error_multiplier'] = st.slider("Error multiplier (σ → CI)", 0.5, 3.0, float(st.session_state.graph_settings.get('error_multiplier',1.96)), step=0.01)
-
-        # more detailed controls
-        col5, col6, col7 = st.columns([1.2, 1.2, 1])
-        with col5:
-            st.session_state.graph_settings['bar_opacity'] = st.slider("Bar Opacity", 0.1, 1.0, st.session_state.graph_settings.get('bar_opacity',0.95))
-            st.session_state.graph_settings['bar_gap'] = st.slider("Bar Gap (group gap)", 0.0, 0.5, st.session_state.graph_settings.get('bar_gap',0.15))
-        with col6:
-            st.session_state.graph_settings['marker_line_width'] = st.slider("Bar Edge Width", 0, 6, st.session_state.graph_settings.get('marker_line_width',1))
-            st.session_state.graph_settings['y_log_scale'] = st.checkbox("Y-axis log scale", st.session_state.graph_settings.get('y_log_scale', False))
-        with col7:
-            y_range = st.slider("Y-axis range (min,max) - set both to adjust, leave unchanged for auto", 0.0, 100.0, (0.0, 10.0))
-            # if user hasn't changed from defaults, keep None to use auto-scaling
-            if y_range != (0.0, 10.0):
-                st.session_state.graph_settings['y_min'] = float(y_range[0])
-                st.session_state.graph_settings['y_max'] = float(y_range[1])
-            else:
-                st.session_state.graph_settings['y_min'] = None
-                st.session_state.graph_settings['y_max'] = None
-
-        # --- Minimal preset controls removed (user requested elimination of presets) ---
-        col1, col2 = st.columns([1,1])
-        with col1:
-            if st.button("🔄 Reset Graph Settings"):
-                if 'graph_settings' in st.session_state:
-                    del st.session_state['graph_settings']
-                st.rerun()
+            st.session_state.graph_settings['title_size'] = st.slider(
+                "Title Size", 10, 36, st.session_state.graph_settings['title_size'], key='global_title'
+            )
         with col2:
-            st.markdown("Presets removed — use sliders & controls to customize.")
-
+            st.session_state.graph_settings['figure_width'] = st.slider(
+                "Width (px)", 600, 2000, st.session_state.graph_settings['figure_width'], key='global_width'
+            )
+            st.session_state.graph_settings['figure_height'] = st.slider(
+                "Height (px)", 300, 1400, st.session_state.graph_settings['figure_height'], key='global_height'
+            )
+        with col3:
+            themes = ['plotly_white', 'plotly', 'plotly_dark', 'seaborn', 'simple_white', 'presentation']
+            curr_theme = st.session_state.graph_settings.get('color_scheme', 'plotly_white')
+            st.session_state.graph_settings['color_scheme'] = st.selectbox(
+                "Theme", themes, 
+                index=themes.index(curr_theme) if curr_theme in themes else 0,
+                key='global_theme'
+            )
+        with col4:
+            st.session_state.graph_settings['show_error'] = st.checkbox(
+                "Error Bars", st.session_state.graph_settings['show_error'], key='global_error'
+            )
+            st.session_state.graph_settings['show_significance'] = st.checkbox(
+                "Significance", st.session_state.graph_settings['show_significance'], key='global_sig'
+            )
+        
+        if st.button("🔄 Reset Settings"):
+            del st.session_state.graph_settings
+            st.rerun()
+        
         st.markdown("---")
-
+        
         # Generate graphs for each gene
-        st.subheader("📊 Gene-Specific Graphs")
+        st.subheader("📊 Gene Graphs")
         
         efficacy_config = EFFICACY_CONFIG.get(st.session_state.selected_efficacy, {})
         
-        # Create graphs
         if 'graphs' not in st.session_state:
             st.session_state.graphs = {}
         
         for gene in st.session_state.processed_data.keys():
             st.markdown(f"### 🧬 {gene}")
             
-            col_left, col_right = st.columns([1.2, 4])
-            with col_left:
-                # gene-level color
-                st.session_state.graph_settings['bar_colors'].setdefault(gene, px.colors.qualitative.Plotly[len(st.session_state.graph_settings['bar_colors']) % len(px.colors.qualitative.Plotly)])
-                st.session_state.graph_settings['bar_colors'][gene] = st.color_picker(f"{gene} color", st.session_state.graph_settings['bar_colors'][gene], key=f"color_{gene}")
-
-                # per-sample per-gene override store
-                if 'sample_gene_overrides' not in st.session_state:
-                    st.session_state['sample_gene_overrides'] = {}  # key = (gene, sample) -> dict{'include':bool, 'color':hex or None}
-                st.markdown("**Per-sample overrides**")
-                # list conditions for this gene (from processed_data)
-                conds = st.session_state.processed_data[gene]['Condition'].tolist()
-                for cond in conds:
-                    key = (gene, cond)
-                    # default include True unless overridden
-                    cur = st.session_state.sample_gene_overrides.get(str(key), {'include': True, 'color': None})
-                    inc = st.checkbox(f"Include {cond}", value=cur.get('include', True), key=f"incl_{gene}_{cond}")
-                    col = st.text_input(f"Color for {cond} (hex or blank)", value=cur.get('color') or '', key=f"col_{gene}_{cond}", label_visibility="collapsed")
-                    st.session_state.sample_gene_overrides[str(key)] = {'include': bool(inc), 'color': col.strip() or None}
-
-            with col_right:
-                # pass overrides into GraphGenerator via the settings object (non-destructive)
-                local_settings = dict(st.session_state.graph_settings)
-                local_settings['bar_colors'] = local_settings.get('bar_colors', {}).copy()
-                # apply per-sample color overrides (for this gene)
-                for cond in conds:
-                    ov = st.session_state.sample_gene_overrides.get(str((gene, cond)), {})
-                    if ov.get('color'):
-                        local_settings['bar_colors'][f"{gene}__{cond}"] = ov['color']
-                        
-                        
+            # Gene-specific color
+            if gene not in st.session_state.graph_settings['bar_colors']:
+                default_colors = px.colors.qualitative.Plotly
+                idx = list(st.session_state.processed_data.keys()).index(gene)
+                st.session_state.graph_settings['bar_colors'][gene] = default_colors[idx % len(default_colors)]
+            
+            col_color, col_graph = st.columns([1, 4])
+            
+            with col_color:
+                st.session_state.graph_settings['bar_colors'][gene] = st.color_picker(
+                    f"{gene} color",
+                    st.session_state.graph_settings['bar_colors'][gene],
+                    key=f"color_{gene}"
+                )
+            
+            with col_graph:
+                # Generate graph
+                gene_data = st.session_state.processed_data[gene]
+                
+                fig = GraphGenerator.create_gene_graph(
+                    gene_data,
+                    gene,
+                    st.session_state.graph_settings,
+                    efficacy_config,
+                    sample_order=st.session_state.get('sample_order'),
+                    per_sample_overrides=None
+                )
+                
+                st.plotly_chart(fig, use_container_width=True, key=f"fig_{gene}")
+                st.session_state.graphs[gene] = fig
+            
+            st.markdown("---")
+    
+    else:
+        st.info("⏳ No analysis results yet. Go to 'Sample Mapping' tab and click 'Run Full Analysis Now'")
+        
+    
 # ==================== TAB 5: EXPORT ====================
 with tab5:
     st.header("Step 5: Export All Results")

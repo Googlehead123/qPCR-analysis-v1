@@ -266,6 +266,97 @@ class AnalysisEngine:
                 })
         
         return pd.DataFrame(results)
+    
+    @staticmethod
+    def calculate_statistics(processed: pd.DataFrame, compare_condition: str,
+                             raw_data: pd.DataFrame = None,
+                             hk_gene: str = None,
+                             sample_mapping: dict = None) -> pd.DataFrame:
+        """
+        Perform two-tailed Welch's t-test (independent samples) comparing each condition
+        to the specified compare_condition. Works safely with triplicates.
+        If raw_data, hk_gene, or sample_mapping are not provided, it falls back to
+        st.session_state variables. Results are added as p_value and significance columns.
+        """
+        import numpy as np
+        from scipy import stats
+        import streamlit as st
+
+        # Use session_state fallbacks if args not provided
+        raw_data = raw_data or st.session_state.get("data")
+        hk_gene = hk_gene or st.session_state.get("hk_gene")
+        sample_mapping = sample_mapping or st.session_state.get("sample_mapping", {})
+
+        # If raw_data missing, return processed unchanged
+        if raw_data is None or hk_gene is None:
+            return processed
+
+        results = processed.copy()
+        results["p_value"] = np.nan
+        results["significance"] = ""
+
+        for target in results["Target"].unique():
+            if pd.isna(target):
+                continue
+
+            # Map samples to user-defined condition names
+            t_rows = raw_data[raw_data["Target"] == target].copy()
+            if t_rows.empty:
+                continue
+            t_rows["Condition"] = t_rows["Sample"].map(
+                lambda s: sample_mapping.get(s, {}).get("condition", s)
+            )
+
+            hk_rows = raw_data[raw_data["Target"] == hk_gene].copy()
+            hk_rows["Condition"] = hk_rows["Sample"].map(
+                lambda s: sample_mapping.get(s, {}).get("condition", s)
+            )
+            hk_means = hk_rows.groupby("Condition")["CT"].mean().to_dict()
+
+            rel_expr = {}
+            for cond, grp in t_rows.groupby("Condition"):
+                hk_mean = hk_means.get(cond, np.nan)
+                if np.isnan(hk_mean):
+                    continue
+                rel_expr[cond] = 2 ** (-(grp["CT"].values - hk_mean))
+
+            # Reference condition replicates
+            ref_vals = rel_expr.get(compare_condition, np.array([]))
+            if ref_vals.size == 0:
+                continue
+
+            # Compare each condition to reference
+            for cond, vals in rel_expr.items():
+                if cond == compare_condition or vals.size == 0:
+                    continue
+
+                try:
+                    if len(ref_vals) >= 2 and len(vals) >= 2:
+                        _, p_val = stats.ttest_ind(ref_vals, vals, equal_var=False)
+                    elif len(ref_vals) == 1 and len(vals) > 1:
+                        _, p_val = stats.ttest_1samp(vals, ref_vals[0])
+                    elif len(vals) == 1 and len(ref_vals) > 1:
+                        _, p_val = stats.ttest_1samp(ref_vals, vals[0])
+                    else:
+                        p_val = np.nan
+                except Exception:
+                    p_val = np.nan
+
+                # Annotate results
+                mask = (results["Target"] == target) & (results["Condition"] == cond)
+                results.loc[mask, "p_value"] = float(p_val) if not np.isnan(p_val) else np.nan
+                if not np.isnan(p_val):
+                    if p_val < 0.001:
+                        sig = "***"
+                    elif p_val < 0.01:
+                        sig = "**"
+                    elif p_val < 0.05:
+                        sig = "*"
+                    else:
+                        sig = ""
+                    results.loc[mask, "significance"] = sig
+
+        return results
 
 # ==================== GRAPH GENERATOR ====================
 class GraphGenerator:

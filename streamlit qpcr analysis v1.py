@@ -525,14 +525,43 @@ class GraphGenerator:
         # Error bars
         error_array = gene_data['SEM'] * settings.get('error_multiplier', 1.96)
         
-        # Add bar trace
+        # Per-bar settings for individual control
+        gene_bar_settings = st.session_state.get(f'{gene}_bar_settings', {})
+        
+        # Check global show/hide for this gene
+        show_error_global = settings.get('show_error', True)
+        show_sig_global = settings.get('show_significance', True)
+        
+        # Build error visibility array
+        error_visible_array = []
+        sig_text_array = []
+        
+        for idx, row in gene_data.iterrows():
+            condition = row['Condition']
+            bar_key = f"{gene}_{condition}"
+            bar_config = gene_bar_settings.get(bar_key, {'show_sig': True, 'show_err': True})
+            
+            # Error bar: both global AND individual must be True
+            if show_error_global and bar_config.get('show_err', True):
+                error_visible_array.append(error_array[idx])
+            else:
+                error_visible_array.append(0)  # Hide by setting to 0
+            
+            # Significance: both global AND individual must be True
+            sig = row.get('significance', '')
+            if show_sig_global and bar_config.get('show_sig', True) and sig in ['*', '**', '***']:
+                sig_text_array.append(sig)
+            else:
+                sig_text_array.append('')
+        
+        # Add bar trace with functional controls
         fig.add_trace(go.Bar(
             x=gene_data['Condition'],
             y=gene_data['Relative_Expression'],
             error_y=dict(
                 type='data',
-                array=error_array,
-                visible=settings.get('show_error', True),
+                array=error_visible_array,  # Use computed array
+                visible=True,  # Always "visible" but values are 0 where hidden
                 thickness=2,
                 width=4,
                 color='rgba(0,0,0,0.5)'
@@ -553,7 +582,7 @@ class GraphGenerator:
         
         # Update layout
         y_axis_config = dict(
-            title=settings.get('ylabel', 'Relative mRNA Expression'),
+            title=settings.get('ylabel', 'Relative mRNA Expression Levels'),
             showgrid=settings.get('show_grid', True),
             gridcolor='lightgray'
         )
@@ -583,24 +612,28 @@ class GraphGenerator:
         gene_tick_size = settings.get(f"{gene}_tick_size", 12)
         gene_tick_angle = settings.get(f"{gene}_tick_angle", -45)
         
-        # ADD P-VALUE LEGEND (bottom right)
+        # P-VALUE LEGEND - OUTSIDE graph, below right side of x-axis
         fig.add_annotation(
-            text="<b>Significance:</b><br>* p<0.05<br>** p<0.01<br>*** p<0.001",
+            text="<b>Significance:</b>  * p<0.05  ** p<0.01  *** p<0.001",
             xref="paper", yref="paper",
-            x=0.98, y=0.02,
-            xanchor='right', yanchor='bottom',
+            x=1.0, y=-0.15,  # Changed: outside plot area, below x-axis
+            xanchor='right', yanchor='top',
             showarrow=False,
-            font=dict(size=10, color='#666666'),
-            bgcolor='rgba(255,255,255,0.8)',
+            font=dict(size=10, color='#666666', family='Arial'),
+            bgcolor='rgba(255,255,255,0.9)',
             bordercolor='#CCCCCC',
             borderwidth=1,
-            borderpad=6
+            borderpad=4
         )
         
         fig.update_layout(
             title=dict(
                 text=f"{gene} Expression",
-                font=dict(size=settings.get('title_size', 20))
+                font=dict(size=settings.get('title_size', 20), family='Arial', color='#333333'),
+                x=0.5,           # CENTER horizontally
+                xanchor='center', # Anchor at center
+                y=0.98,          # Position at top
+                yanchor='top'    # Anchor at top
             ),
             xaxis=dict(
                 title=None,
@@ -618,12 +651,12 @@ class GraphGenerator:
             bargap=gene_bar_gap,
             showlegend=settings.get('show_legend', False),
             plot_bgcolor=gene_bg_color,
-            margin=dict(
-                l=gene_margins['l'],
-                r=gene_margins['r'],
-                t=gene_margins['t'],
-                b=gene_margins['b']
-            )
+        margin=dict(
+            l=gene_margins.get('l', 80),
+            r=gene_margins.get('r', 80),
+            t=gene_margins.get('t', 100),
+            b=gene_margins.get('b', 120)  # Increased from 100 to 120 for legend space
+        )
         )
         
         return fig
@@ -1202,7 +1235,7 @@ with tab4:
                 'figure_width': 1000, 'figure_height': 600,
                 'color_scheme': 'plotly_white', 'show_error': True,
                 'show_significance': True, 'show_grid': True,
-                'xlabel': 'Condition', 'ylabel': 'Fold Change (Relative to Control)',
+                'xlabel': 'Condition', 'ylabel': 'Relative mRNA Expression Levels',
                 'bar_colors': {}, 'orientation': 'v', 'error_multiplier': 1.96,
                 'bar_opacity': 0.95, 'bar_gap': 0.15, 'marker_line_width': 1,
                 'show_legend': False, 'y_log_scale': False, 'y_min': None, 'y_max': None
@@ -1376,19 +1409,26 @@ with tab4:
                                         'show_err': True
                                     }
                                     st.rerun()
-                    with col_graph:
-                        # [Graph generation code - see TASK 6 for title centering]
-                        gene_data = st.session_state.processed_data[gene]
-                        
-                        fig = GraphGenerator.create_gene_graph(
-                            gene_data,
-                            gene,
-                            st.session_state.graph_settings,
-                            EFFICACY_CONFIG.get(st.session_state.selected_efficacy, {}),
-                            sample_order=st.session_state.get('sample_order'),
-                            per_sample_overrides=None
-                        )
-                        
+                        with col_graph:
+                                        gene_data = st.session_state.processed_data[gene]
+                                        
+                                        # Apply gene-specific show/hide settings
+                                        show_sig_key = f"{gene}_show_sig"
+                                        show_err_key = f"{gene}_show_err"
+                                        
+                                        # Update settings with gene-specific values
+                                        current_settings = st.session_state.graph_settings.copy()
+                                        current_settings['show_significance'] = current_settings.get(show_sig_key, True)
+                                        current_settings['show_error'] = current_settings.get(show_err_key, True)
+                                        
+                                        fig = GraphGenerator.create_gene_graph(
+                                            gene_data,
+                                            gene,
+                                            current_settings,  # Pass updated settings
+                                            EFFICACY_CONFIG.get(st.session_state.selected_efficacy, {}),
+                                            sample_order=st.session_state.get('sample_order'),
+                                            per_sample_overrides=None
+                                        )
                         st.plotly_chart(fig, use_container_width=True, key=f"fig_{gene}")
                         st.session_state.graphs[gene] = fig     
  

@@ -589,7 +589,7 @@ class GraphGenerator:
         
         # Update layout
         y_axis_config = dict(
-            title=settings.get('ylabel', 'Relative mRNA Expression Levels'),
+            title=settings.get('ylabel', 'Relative mRNA Expression Level'),
             showgrid=settings.get('show_grid', True),
             gridcolor='lightgray'
         )
@@ -1153,7 +1153,7 @@ with tab4:
                 'figure_width': 1000, 'figure_height': 600,
                 'color_scheme': 'plotly_white', 'show_error': True,
                 'show_significance': True, 'show_grid': True,
-                'xlabel': 'Condition', 'ylabel': 'Relative mRNA Expression Levels',
+                'xlabel': 'Condition', 'ylabel': 'Relative mRNA Expression Level',
                 'bar_colors': {}, 'orientation': 'v', 'error_multiplier': 1.96,
                 'bar_opacity': 0.95, 'bar_gap': 0.15, 'marker_line_width': 1,
                 'show_legend': False, 'y_log_scale': False, 'y_min': None, 'y_max': None
@@ -1214,69 +1214,95 @@ with tab4:
                     key=f"gap_{gene}"
                 )
                 
-                # === Y-AXIS ===
-                st.markdown("#### 📈 Y-Axis Range")
-                y_auto_key = f"{gene}_y_auto"
-                if y_auto_key not in st.session_state.graph_settings:
-                    st.session_state.graph_settings[y_auto_key] = True
-                
-                auto_y = st.checkbox(
-                    "Auto Y-axis",
-                    st.session_state.graph_settings[y_auto_key],
-                    key=f"auto_y_{gene}"
-                )
-                st.session_state.graph_settings[y_auto_key] = auto_y
-                
-                if not auto_y:
-                    y_min_key = f"{gene}_y_min"
-                    y_max_key = f"{gene}_y_max"
-                    if y_min_key not in st.session_state.graph_settings:
-                        st.session_state.graph_settings[y_min_key] = 0.0
-                    if y_max_key not in st.session_state.graph_settings:
-                        st.session_state.graph_settings[y_max_key] = 3.0
-                    
-                    col_y1, col_y2 = st.columns(2)
-                    with col_y1:
-                        st.session_state.graph_settings[y_min_key] = st.number_input(
-                            "Min", value=st.session_state.graph_settings[y_min_key],
-                            step=0.1, key=f"ymin_{gene}"
-                        )
-                    with col_y2:
-                        st.session_state.graph_settings[y_max_key] = st.number_input(
-                            "Max", value=st.session_state.graph_settings[y_max_key],
-                            step=0.1, key=f"ymax_{gene}"
-                        )
-                
                 # === BAR COLORS & INDIVIDUAL CONTROLS ===
                 st.markdown("#### 🎨 Bar Colors & Controls")
+                st.caption("Customize each bar individually")
                 
-                # [MOVE ALL YOUR COLOR PICKER AND PER-BAR EXPANDERS HERE]
-                # Keep the existing expander code for individual bar customization
-                
-            with col_graph:
-                # Generate graph
                 gene_data = st.session_state.processed_data[gene]
                 
-                # Apply gene-specific settings
-                show_sig_key = f"{gene}_show_sig"
-                show_err_key = f"{gene}_show_err"
+                # Initialize per-bar settings storage
+                if f'{gene}_bar_settings' not in st.session_state:
+                    st.session_state[f'{gene}_bar_settings'] = {}
                 
-                current_settings = st.session_state.graph_settings.copy()
-                current_settings['show_significance'] = current_settings.get(show_sig_key, True)
-                current_settings['show_error'] = current_settings.get(show_err_key, True)
+                # Initialize bar_colors_per_sample if not exists
+                if 'bar_colors_per_sample' not in st.session_state.graph_settings:
+                    st.session_state.graph_settings['bar_colors_per_sample'] = {}
                 
-                fig = GraphGenerator.create_gene_graph(
-                    gene_data,
-                    gene,
-                    current_settings,
-                    EFFICACY_CONFIG.get(st.session_state.selected_efficacy, {}),
-                    sample_order=st.session_state.get('sample_order'),
-                    per_sample_overrides=None
-                )
-                
-                st.plotly_chart(fig, use_container_width=True, key=f"fig_{gene}")
-                st.session_state.graphs[gene] = fig
-                
+                # Loop through each bar/condition
+                for idx, (_, row) in enumerate(gene_data.iterrows()):
+                    condition = row['Condition']
+                    group = row.get('Group', 'Treatment')
+                    
+                    # Determine default color based on group
+                    default_colors = {
+                        'Baseline': '#FFFFFF',
+                        'Non-treated': '#FFFFFF',
+                        'Control': '#FFFFFF',
+                        'Negative Control': '#9E9E9E',
+                        'Inducer': '#9E9E9E',
+                        'Positive Control': '#9E9E9E',
+                        'Treatment': '#D3D3D3'
+                    }
+                    default_color = default_colors.get(group, '#D3D3D3')
+                    
+                    # Unique key for this bar
+                    bar_key = f"{gene}_{condition}"
+                    
+                    # Initialize settings for this bar if not exists
+                    if bar_key not in st.session_state[f'{gene}_bar_settings']:
+                        st.session_state[f'{gene}_bar_settings'][bar_key] = {
+                            'color': default_color,
+                            'show_sig': True,
+                            'show_err': True
+                        }
+                    
+                    # Create expandable section for each bar
+                    with st.expander(f"📊 {condition} ({group})", expanded=False):
+                        
+                        # COLOR PICKER
+                        st.markdown("**🎨 Bar Color**")
+                        new_color = st.color_picker(
+                            "Choose color",
+                            st.session_state[f'{gene}_bar_settings'][bar_key]['color'],
+                            key=f"color_{gene}_{condition}_{idx}",
+                            label_visibility="collapsed"
+                        )
+                        # Update both locations
+                        st.session_state[f'{gene}_bar_settings'][bar_key]['color'] = new_color
+                        st.session_state.graph_settings['bar_colors_per_sample'][bar_key] = new_color
+                        
+                        st.markdown("---")
+                        
+                        # SIGNIFICANCE TOGGLE
+                        st.markdown("**✨ Significance Star**")
+                        show_sig_bar = st.checkbox(
+                            "Show significance marker",
+                            st.session_state[f'{gene}_bar_settings'][bar_key]['show_sig'],
+                            key=f"sig_{gene}_{condition}_{idx}"
+                        )
+                        st.session_state[f'{gene}_bar_settings'][bar_key]['show_sig'] = show_sig_bar
+                        
+                        # ERROR BAR TOGGLE
+                        st.markdown("**📏 Error Bar**")
+                        show_err_bar = st.checkbox(
+                            "Show error bar",
+                            st.session_state[f'{gene}_bar_settings'][bar_key]['show_err'],
+                            key=f"err_{gene}_{condition}_{idx}"
+                        )
+                        st.session_state[f'{gene}_bar_settings'][bar_key]['show_err'] = show_err_bar
+                        
+                        st.markdown("---")
+                        
+                        # RESET BUTTON
+                        if st.button("↺ Reset to Default", key=f"reset_{gene}_{condition}_{idx}", use_container_width=True):
+                            st.session_state[f'{gene}_bar_settings'][bar_key] = {
+                                'color': default_color,
+                                'show_sig': True,
+                                'show_err': True
+                            }
+                            if bar_key in st.session_state.graph_settings.get('bar_colors_per_sample', {}):
+                                del st.session_state.graph_settings['bar_colors_per_sample'][bar_key]
+                            st.rerun()
     else:
         st.info("⏳ No analysis results yet. Go to 'Sample Mapping' tab and click 'Run Full Analysis Now'")
         

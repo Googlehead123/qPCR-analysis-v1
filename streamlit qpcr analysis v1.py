@@ -1215,6 +1215,11 @@ with tab4:
                 )
                 
                 # === BAR COLORS & INDIVIDUAL CONTROLS ===
+
+                # Generate graph
+                gene_data = st.session_state.processed_data[gene]
+                
+                # === BAR COLORS & INDIVIDUAL CONTROLS ===
                 st.markdown("#### 🎨 Bar Colors & Controls")
                 st.caption("Customize each bar individually")
                 
@@ -1303,6 +1308,7 @@ with tab4:
                             if bar_key in st.session_state.graph_settings.get('bar_colors_per_sample', {}):
                                 del st.session_state.graph_settings['bar_colors_per_sample'][bar_key]
                             st.rerun()
+
     else:
         st.info("⏳ No analysis results yet. Go to 'Sample Mapping' tab and click 'Run Full Analysis Now'")
         

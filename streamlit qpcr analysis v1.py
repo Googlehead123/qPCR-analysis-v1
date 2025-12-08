@@ -236,7 +236,7 @@ class AnalysisEngine:
                     ref_delta_ct = ref_target['CT'].mean() - ref_hk['CT'].mean()
                 else:
                     ref_delta_ct = 0
-                
+
                 # ΔΔCt and relative expression
                 ddct = delta_ct - ref_delta_ct
                 rel_expr = 2 ** (-ddct)
@@ -1163,367 +1163,236 @@ with tab3:
     else:
         st.info("⏳ No analysis results yet. Go to 'Sample Mapping' tab and click 'Run Full Analysis Now'")
         
-# ==================== TAB 4: GRAPHS ====================
+# ==================== TAB 4: GRAPHS (IMPROVED UI/UX - ERROR-SAFE) ====================
 with tab4:
-    st.header("Step 4: Individual Gene Graphs")
+    st.header("Step 4: Advanced Gene Visualization 📈")
+    st.markdown("---")
     
     if st.session_state.processed_data:
-        # Initialize graph settings
+        
+        # --- Persistent Settings Initialization ---
+        # 1. Global Settings
         if 'graph_settings' not in st.session_state:
-            st.session_state.graph_settings = {
-                'title_size': 20, 'font_size': 14, 'sig_font_size': 16,
-                'figure_width': 1000, 'figure_height': 600,
-                'color_scheme': 'plotly_white', 'show_error': True,
-                'show_significance': True, 'show_grid': True,
-                'xlabel': 'Condition', 'ylabel': 'Fold Change (Relative to Control)',
-                'bar_colors': {}, 'orientation': 'v', 'error_multiplier': 1.96,
-                'bar_opacity': 0.95, 'bar_gap': 0.15, 'marker_line_width': 1,
-                'show_legend': False, 'y_log_scale': False, 'y_min': None, 'y_max': None
+            st.session_state.graph_settings = { 
+                'title_size': 24, 'font_size': 12, 'sig_font_size': 18, 
+                'figure_width': 700, 'figure_height': 500, 
+                'color_scheme': 'plotly_white', 'show_error': True, 
+                'show_significance': True, 'show_grid': True, 
+                'xlabel': 'Condition', 'ylabel': 'Fold Change (Relative Expression)', 
+                'bar_colors': {}, 'error_multiplier': 1.96, 'bar_opacity': 0.95, 
+                'bar_gap': 0.1, 'marker_line_width': 1, 'show_legend': False, 
+                'y_log_scale': False, 'y_min': 0, 'y_max': None,
+                'bar_colors_per_sample': {}
             }
+            
+        # 2. Per-Gene Customizations (Dedicated Dictionary for safety and clarity)
+        if 'gene_customizations' not in st.session_state:
+            st.session_state.gene_customizations = {}
+
+        # --- PRE-INITIALIZE ALL GENE SETTINGS (CRITICAL ERROR FIX) ---
+        # This loop runs once or on rerun, ensuring all necessary keys exist 
+        # BEFORE the main plotting loop (the one that causes the error) begins.
+        for gene in st.session_state.processed_data.keys():
+            if gene not in st.session_state.gene_customizations:
+                st.session_state.gene_customizations[gene] = {
+                    'title_size': st.session_state.graph_settings['title_size'],
+                    'y_log_scale': st.session_state.graph_settings['y_log_scale'],
+                    'y_min': st.session_state.graph_settings['y_min'],
+                    'y_max': st.session_state.graph_settings['y_max'],
+                    'bar_gap': st.session_state.graph_settings['bar_gap'],
+                    'tick_angle': -45, # Default value
+                    'bg_color': '#FFFFFF', # Default value
+                    'grid_color': '#E5E5E5', # Default value
+                }
         
-        # Global settings
-        st.subheader("⚙️ Global Graph Settings")
-        
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            st.session_state.graph_settings['font_size'] = st.slider(
-                "Font Size", 8, 28, st.session_state.graph_settings['font_size'], key='global_font'
-            )
-            st.session_state.graph_settings['title_size'] = st.slider(
-                "Title Size", 10, 36, st.session_state.graph_settings['title_size'], key='global_title'
-            )
-        with col2:
-            st.session_state.graph_settings['figure_width'] = st.slider(
-                "Width (px)", 600, 2000, st.session_state.graph_settings['figure_width'], key='global_width'
-            )
-            st.session_state.graph_settings['figure_height'] = st.slider(
-                "Height (px)", 300, 1400, st.session_state.graph_settings['figure_height'], key='global_height'
-            )
-        with col3:
-            themes = ['plotly_white', 'plotly', 'plotly_dark', 'seaborn', 'simple_white', 'presentation']
-            curr_theme = st.session_state.graph_settings.get('color_scheme', 'plotly_white')
-            st.session_state.graph_settings['color_scheme'] = st.selectbox(
-                "Theme", themes, 
-                index=themes.index(curr_theme) if curr_theme in themes else 0,
-                key='global_theme'
-            )
-        with col4:
-            st.session_state.graph_settings['show_error'] = st.checkbox(
-                "Error Bars", st.session_state.graph_settings['show_error'], key='global_error'
-            )
-            st.session_state.graph_settings['show_significance'] = st.checkbox(
-                "Significance", st.session_state.graph_settings['show_significance'], key='global_sig'
-            )
-        
-        if st.button("🔄 Reset Settings"):
-            del st.session_state.graph_settings
-            st.rerun()
-        
+        # --- Global Defaults/Reset Panel (Compact Expander) ---
+        # This replaces the old, large Global Graph Settings panel
+        with st.expander("🛠️ Global Visualization Defaults & Reset", expanded=False):
+            col_g1, col_g2, col_g3 = st.columns(3)
+            
+            with col_g1:
+                st.session_state.graph_settings['figure_width'] = st.number_input(
+                    "Default Width (px)", 300, 2000, st.session_state.graph_settings['figure_width'], key='g_width', step=100
+                )
+                st.session_state.graph_settings['figure_height'] = st.number_input(
+                    "Default Height (px)", 300, 1400, st.session_state.graph_settings['figure_height'], key='g_height', step=100
+                )
+            
+            with col_g2:
+                themes = ['plotly_white', 'plotly', 'simple_white', 'plotly_dark', 'seaborn', 'presentation']
+                curr_theme = st.session_state.graph_settings.get('color_scheme', 'plotly_white')
+                st.session_state.graph_settings['color_scheme'] = st.selectbox(
+                    "Default Theme", themes, index=themes.index(curr_theme) if curr_theme in themes else 0, key='g_theme'
+                )
+                st.session_state.graph_settings['font_size'] = st.slider( "Default Font Size", 8, 20, st.session_state.graph_settings['font_size'], key='g_font' )
+            
+            with col_g3:
+                st.session_state.graph_settings['show_error'] = st.checkbox("Show Error Bars", st.session_state.graph_settings['show_error'], key='g_error')
+                st.session_state.graph_settings['show_significance'] = st.checkbox("Show Significance Stars", st.session_state.graph_settings['show_significance'], key='g_sig')
+                if st.button("🔄 Reset ALL Settings", use_container_width=True):
+                    # Safely delete keys and force a rerun
+                    for key in ['graph_settings', 'gene_customizations', 'graphs']:
+                         if key in st.session_state:
+                             del st.session_state[key]
+                    st.rerun()
+
         st.markdown("---")
         
-        # Generate graphs for each gene
-        st.subheader("📊 Gene Graphs")
-        
+        # --- Gene-by-Gene Iteration (New UI/UX) ---
         efficacy_config = EFFICACY_CONFIG.get(st.session_state.selected_efficacy, {})
         
-        if 'graphs' not in st.session_state:
-            st.session_state.graphs = {}
+        # Use columns for a clean 2-column layout of genes
+        gene_columns = st.columns(2)
         
-        for gene in st.session_state.processed_data.keys():
-            st.markdown(f"### 🧬 {gene}")
+        # Iterate over the stable dictionary keys
+        for i, gene in enumerate(st.session_state.processed_data.keys()):
+            # Get the dedicated settings dictionary for the current gene
+            gene_settings = st.session_state.gene_customizations[gene] 
             
-            # Initialize per-sample colors if not exists
-            if 'bar_colors_per_sample' not in st.session_state.graph_settings:
-                st.session_state.graph_settings['bar_colors_per_sample'] = {}
-            
-            # Gene-specific color (default for treatments)
-            if gene not in st.session_state.graph_settings['bar_colors']:
-                default_colors = px.colors.qualitative.Plotly
-                idx = list(st.session_state.processed_data.keys()).index(gene)
-                st.session_state.graph_settings['bar_colors'][gene] = default_colors[idx % len(default_colors)]
-            
-            # Expandable color customization panel
-            with st.expander(f"🎨 Customize {gene} Colors", expanded=False):
-                st.markdown("**Default Treatment Color:**")
-                st.session_state.graph_settings['bar_colors'][gene] = st.color_picker(
-                    "Default color for treatment samples",
-                    st.session_state.graph_settings['bar_colors'][gene],
-                    key=f"default_color_{gene}"
+            with gene_columns[i % 2]:
+                
+                # --- High-Tech Panel Container (CSS for WoW factor) ---
+                st.markdown(f"""
+                <div style='
+                    background-color: #f8f9fa; 
+                    padding: 15px; 
+                    border-radius: 10px; 
+                    margin-bottom: 20px; 
+                    box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+                    border-left: 5px solid #007bff;
+                '>
+                    <h3 style='margin-top: 0; color: #007bff;'>🧬 {gene} Result</h3>
+                """, unsafe_allow_html=True)
+                
+                # --- 1. Compact Customization Bar ---
+                col_c1, col_c2, col_c3, col_c4, col_c5 = st.columns([1, 1.5, 1, 1, 1])
+                
+                # Toggle Log Scale (Uses gene_settings directly)
+                with col_c1:
+                    gene_settings['y_log_scale'] = st.checkbox(
+                        "Log Y", gene_settings['y_log_scale'], key=f"log_y_{gene}", help="Toggle Y-axis logarithmic scale", label_visibility="collapsed"
+                    )
+                    st.caption("Log Y")
+                    
+                # Title Size Override (Uses gene_settings directly)
+                with col_c2:
+                    gene_settings['title_size'] = st.slider(
+                        "Title Size", 10, 40, gene_settings['title_size'], key=f"ts_{gene}", label_visibility="collapsed"
+                    )
+                    st.caption("Title Size")
+                
+                # Y-Range Popover
+                with col_c3:
+                    with st.popover("📐 Range"):
+                        st.markdown("**Y-Axis Range**")
+                        
+                        gene_settings['y_min'] = st.number_input(
+                            "Min Y", value=gene_settings['y_min'], key=f"ymin_{gene}"
+                        )
+                        gene_settings['y_max'] = st.number_input(
+                            "Max Y", value=gene_settings['y_max'], key=f"ymax_{gene}"
+                        )
+                    st.caption("Y-Axis")
+
+                # Advanced Layout Popover
+                with col_c4:
+                    with st.popover("⚙️ Layout"):
+                        st.markdown("**Advanced Layout**")
+                        col_l1, col_l2 = st.columns(2)
+                        
+                        with col_l1:
+                            # Bar Gap
+                            gene_settings['bar_gap'] = st.slider(
+                                "Bar Gap", 0.0, 0.5, gene_settings['bar_gap'], 0.01, key=f"gap_{gene}", label_visibility="collapsed"
+                            )
+                            # X-Tick Angle
+                            gene_settings['tick_angle'] = st.slider( 
+                                "X-Tick Angle", -90, 90, gene_settings['tick_angle'], key=f"tickang_{gene}", label_visibility="collapsed"
+                            )
+                            
+                        with col_l2:
+                            # Plot BG Color
+                            gene_settings['bg_color'] = st.color_picker(
+                                "BG Color", gene_settings['bg_color'], key=f"bgc_{gene}", label_visibility="collapsed"
+                            )
+                            # Grid Color
+                            gene_settings['grid_color'] = st.color_picker(
+                                "Grid Color", gene_settings['grid_color'], key=f"gc_{gene}", label_visibility="collapsed"
+                            )
+                    st.caption("Layout")
+                
+                # Color Picker Popover
+                with col_c5:
+                    gene_data_for_color = st.session_state.processed_data[gene]
+                    conditions = gene_data_for_color['Condition'].unique()
+                    
+                    with st.popover("🎨 Colors"):
+                        st.markdown(f"**Gene Default Color:**")
+                        default_color = st.session_state.graph_settings['bar_colors'].get(gene, '#007bff')
+                        st.session_state.graph_settings['bar_colors'][gene] = st.color_picker(
+                            f"Default Color for {gene}", default_color, key=f"gene_color_{gene}"
+                        )
+                        st.markdown("---")
+                        st.markdown(f"**Individual Bar Overrides:**")
+                        
+                        # Loop through conditions to offer individual overrides
+                        for condition in conditions:
+                            custom_key = f"{gene}_{condition}"
+                            
+                            # Determine current color (default to gene default if no override)
+                            current_bar_color = st.session_state.graph_settings['bar_colors_per_sample'].get(
+                                custom_key, 
+                                st.session_state.graph_settings['bar_colors'][gene]
+                            )
+                            
+                            col_bar_c, col_bar_r = st.columns([3, 1])
+                            
+                            with col_bar_c:
+                                new_color = st.color_picker( 
+                                    f"Bar: {condition}", current_bar_color, key=f"bar_color_{gene}_{condition}" 
+                                )
+                                # Save override color
+                                st.session_state.graph_settings['bar_colors_per_sample'][custom_key] = new_color
+                            
+                            with col_bar_r:
+                                st.markdown("<div style='padding-top: 25px;'>", unsafe_allow_html=True)
+                                # The reset button deletes from a nested dictionary, which is safe.
+                                if st.button("X", key=f"reset_{gene}_{condition}", help="Reset to gene default", use_container_width=True):
+                                    if custom_key in st.session_state.graph_settings['bar_colors_per_sample']:
+                                        del st.session_state.graph_settings['bar_colors_per_sample'][custom_key]
+                                    st.rerun() 
+
+                    st.caption("Bar Colors")
+
+
+                st.markdown("<hr style='border: 1px dashed #ced4da;'>", unsafe_allow_html=True)
+
+                # --- 2. Generate and Display Graph ---
+                
+                # Merge global settings with gene-specific overrides for final plotting
+                final_settings = st.session_state.graph_settings.copy()
+                final_settings.update(gene_settings) # Override global settings with gene-specific settings
+                
+                gene_data = st.session_state.processed_data[gene]
+                sample_order = st.session_state.get('sample_order')
+                
+                fig = GraphGenerator.create_gene_graph(
+                    gene_data,
+                    gene,
+                    final_settings, # Pass the consolidated final settings
+                    efficacy_config,
+                    sample_order
                 )
                 
-                st.markdown("---")
-                st.markdown("**Individual Bar Colors (override defaults):**")
-                st.caption("Controls default to grey tones. Customize any bar below:")
+                # Final touch: store the generated figure for export
+                st.session_state.graphs[gene] = fig
+                st.plotly_chart(fig, use_container_width=True)
                 
-                # Get all conditions for this gene
-                gene_data = st.session_state.processed_data[gene]
-                
-                # Create color pickers for each condition
-                cols = st.columns(3)
-                for idx, (_, row) in enumerate(gene_data.iterrows()):
-                    condition = row['Condition']
-                    group = row.get('Group', 'Treatment')
-                    custom_key = f"{gene}_{condition}"
-                    
-                    with cols[idx % 3]:
-                        # Show current group type
-                        st.caption(f"**{condition}**")
-                        st.text(f"Group: {group}")
-                        
-                        # Get current color (default or custom)
-                        if custom_key in st.session_state.graph_settings['bar_colors_per_sample']:
-                            current_color = st.session_state.graph_settings['bar_colors_per_sample'][custom_key]
-                        else:
-                            # Show default based on group
-                            control_defaults = {
-                                'Baseline': '#E8E8E8',
-                                'Non-treated': '#E8E8E8',
-                                'Control': '#E8E8E8',
-                                'Negative Control': '#BDBDBD',
-                                'Inducer': '#BDBDBD',
-                                'Positive Control': '#757575',
-                                'Treatment': st.session_state.graph_settings['bar_colors'][gene]
-                            }
-                            current_color = control_defaults.get(group, st.session_state.graph_settings['bar_colors'][gene])
-                        
-                        # Color picker
-                        new_color = st.color_picker(
-                            f"Color",
-                            current_color,
-                            key=f"bar_color_{gene}_{condition}",
-                            label_visibility="collapsed"
-                        )
-                        st.session_state.graph_settings['bar_colors_per_sample'][custom_key] = new_color
-                        
-                        # Reset button
-                        if st.button("↺", key=f"reset_{gene}_{condition}", help="Reset to default"):
-                            if custom_key in st.session_state.graph_settings['bar_colors_per_sample']:
-                                del st.session_state.graph_settings['bar_colors_per_sample'][custom_key]
-                            st.rerun()
-            # ADD THIS NEW EXPANDER for detailed graph controls
-            with st.expander(f"⚙️ Advanced {gene} Settings", expanded=False):
-                st.markdown("#### 📐 Layout & Spacing")
-                
-                col_layout1, col_layout2, col_layout3 = st.columns(3)
-                
-                with col_layout1:
-                    # Bar spacing
-                    bar_gap_key = f"{gene}_bar_gap"
-                    if bar_gap_key not in st.session_state.graph_settings:
-                        st.session_state.graph_settings[bar_gap_key] = 0.15
-                    
-                    st.session_state.graph_settings[bar_gap_key] = st.slider(
-                        "Bar Gap (spacing)",
-                        0.0, 0.5,
-                        st.session_state.graph_settings[bar_gap_key],
-                        0.01,
-                        key=f"gap_{gene}",
-                        help="Space between bars"
-                    )
-                    
-                    # Bar width
-                    bar_width_key = f"{gene}_bar_width"
-                    if bar_width_key not in st.session_state.graph_settings:
-                        st.session_state.graph_settings[bar_width_key] = 0.8
-                    
-                    st.session_state.graph_settings[bar_width_key] = st.slider(
-                        "Bar Width",
-                        0.1, 1.5,
-                        st.session_state.graph_settings[bar_width_key],
-                        0.05,
-                        key=f"width_{gene}"
-                    )
-                
-                with col_layout2:
-                    # Margin controls
-                    st.markdown("**Plot Margins (px)**")
-                    
-                    margin_key = f"{gene}_margins"
-                    if margin_key not in st.session_state.graph_settings:
-                        st.session_state.graph_settings[margin_key] = {'l': 80, 'r': 80, 't': 100, 'b': 100}
-                    
-                    margins = st.session_state.graph_settings[margin_key]
-                    margins['l'] = st.number_input("Left", 0, 200, margins['l'], key=f"ml_{gene}")
-                    margins['r'] = st.number_input("Right", 0, 200, margins['r'], key=f"mr_{gene}")
-                    margins['t'] = st.number_input("Top", 0, 200, margins['t'], key=f"mt_{gene}")
-                    margins['b'] = st.number_input("Bottom", 0, 200, margins['b'], key=f"mb_{gene}")
-                
-                with col_layout3:
-                    # Background & grid
-                    st.markdown("**Background & Grid**")
-                    
-                    bg_color_key = f"{gene}_bg_color"
-                    if bg_color_key not in st.session_state.graph_settings:
-                        st.session_state.graph_settings[bg_color_key] = '#FFFFFF'
-                    
-                    st.session_state.graph_settings[bg_color_key] = st.color_picker(
-                        "Plot Background",
-                        st.session_state.graph_settings[bg_color_key],
-                        key=f"bg_{gene}"
-                    )
-                    
-                    grid_color_key = f"{gene}_grid_color"
-                    if grid_color_key not in st.session_state.graph_settings:
-                        st.session_state.graph_settings[grid_color_key] = '#E5E5E5'
-                    
-                    st.session_state.graph_settings[grid_color_key] = st.color_picker(
-                        "Grid Color",
-                        st.session_state.graph_settings[grid_color_key],
-                        key=f"grid_{gene}"
-                    )
-                    
-                    grid_width_key = f"{gene}_grid_width"
-                    if grid_width_key not in st.session_state.graph_settings:
-                        st.session_state.graph_settings[grid_width_key] = 1
-                    
-                    st.session_state.graph_settings[grid_width_key] = st.slider(
-                        "Grid Line Width",
-                        0, 5,
-                        st.session_state.graph_settings[grid_width_key],
-                        key=f"gwidth_{gene}"
-                    )
-                
-                st.markdown("---")
-                st.markdown("#### 🔤 Text Formatting")
-                
-                col_text1, col_text2, col_text3 = st.columns(3)
-                
-                with col_text1:
-                    # X-axis label controls
-                    st.markdown("**X-Axis Label**")
-                    
-                    xlabel_size_key = f"{gene}_xlabel_size"
-                    if xlabel_size_key not in st.session_state.graph_settings:
-                        st.session_state.graph_settings[xlabel_size_key] = 14
-                    
-                    st.session_state.graph_settings[xlabel_size_key] = st.slider(
-                        "Size",
-                        8, 24,
-                        st.session_state.graph_settings[xlabel_size_key],
-                        key=f"xlsize_{gene}"
-                    )
-                    
-                    xlabel_color_key = f"{gene}_xlabel_color"
-                    if xlabel_color_key not in st.session_state.graph_settings:
-                        st.session_state.graph_settings[xlabel_color_key] = '#000000'
-                    
-                    st.session_state.graph_settings[xlabel_color_key] = st.color_picker(
-                        "Color",
-                        st.session_state.graph_settings[xlabel_color_key],
-                        key=f"xlcolor_{gene}"
-                    )
-                
-                with col_text2:
-                    # Y-axis label controls
-                    st.markdown("**Y-Axis Label**")
-                    
-                    ylabel_size_key = f"{gene}_ylabel_size"
-                    if ylabel_size_key not in st.session_state.graph_settings:
-                        st.session_state.graph_settings[ylabel_size_key] = 14
-                    
-                    st.session_state.graph_settings[ylabel_size_key] = st.slider(
-                        "Size",
-                        8, 24,
-                        st.session_state.graph_settings[ylabel_size_key],
-                        key=f"ylsize_{gene}"
-                    )
-                    
-                    ylabel_color_key = f"{gene}_ylabel_color"
-                    if ylabel_color_key not in st.session_state.graph_settings:
-                        st.session_state.graph_settings[ylabel_color_key] = '#000000'
-                    
-                    st.session_state.graph_settings[ylabel_color_key] = st.color_picker(
-                        "Color",
-                        st.session_state.graph_settings[ylabel_color_key],
-                        key=f"ylcolor_{gene}"
-                    )
-                
-                with col_text3:
-                    # Tick label controls
-                    st.markdown("**Tick Labels**")
-                    
-                    tick_size_key = f"{gene}_tick_size"
-                    if tick_size_key not in st.session_state.graph_settings:
-                        st.session_state.graph_settings[tick_size_key] = 12
-                    
-                    st.session_state.graph_settings[tick_size_key] = st.slider(
-                        "Size",
-                        6, 20,
-                        st.session_state.graph_settings[tick_size_key],
-                        key=f"ticksize_{gene}"
-                    )
-                    
-                    tick_angle_key = f"{gene}_tick_angle"
-                    if tick_angle_key not in st.session_state.graph_settings:
-                        st.session_state.graph_settings[tick_angle_key] = -45
-                    
-                    st.session_state.graph_settings[tick_angle_key] = st.slider(
-                        "X-Tick Angle",
-                        -90, 90,
-                        st.session_state.graph_settings[tick_angle_key],
-                        key=f"tickang_{gene}"
-                    )
-                
-                st.markdown("---")
-                st.markdown("#### ⭐ Significance Stars")
-                
-                col_sig1, col_sig2, col_sig3 = st.columns(3)
-                
-                with col_sig1:
-                    sig_size_key = f"{gene}_sig_size"
-                    if sig_size_key not in st.session_state.graph_settings:
-                        st.session_state.graph_settings[sig_size_key] = 16
-                    
-                    st.session_state.graph_settings[sig_size_key] = st.slider(
-                        "Star Size",
-                        8, 32,
-                        st.session_state.graph_settings[sig_size_key],
-                        key=f"sigsize_{gene}"
-                    )
-                
-                with col_sig2:
-                    sig_color_key = f"{gene}_sig_color"
-                    if sig_color_key not in st.session_state.graph_settings:
-                        st.session_state.graph_settings[sig_color_key] = '#000000'
-                    
-                    st.session_state.graph_settings[sig_color_key] = st.color_picker(
-                        "Star Color",
-                        st.session_state.graph_settings[sig_color_key],
-                        key=f"sigcolor_{gene}"
-                    )
-                
-                with col_sig3:
-                    sig_pos_key = f"{gene}_sig_position"
-                    if sig_pos_key not in st.session_state.graph_settings:
-                        st.session_state.graph_settings[sig_pos_key] = 'outside'
-                    
-                    st.session_state.graph_settings[sig_pos_key] = st.selectbox(
-                        "Position",
-                        ['outside', 'inside', 'auto'],
-                        index=['outside', 'inside', 'auto'].index(st.session_state.graph_settings[sig_pos_key]),
-                        key=f"sigpos_{gene}"
-                    )
-            
-            # Generate graph
-            gene_data = st.session_state.processed_data[gene]
-            
-            fig = GraphGenerator.create_gene_graph(
-                gene_data,
-                gene,
-                st.session_state.graph_settings,
-                EFFICACY_CONFIG.get(st.session_state.selected_efficacy, {}),
-                sample_order=st.session_state.get('sample_order'),
-                per_sample_overrides=None
-            )
-            
-            st.plotly_chart(fig, use_container_width=True, key=f"fig_{gene}")
-            st.session_state.graphs[gene] = fig
-            
-            st.markdown("---")
-    
+                # --- Panel Footer (Close the container) ---
+                st.markdown("</div>", unsafe_allow_html=True)
+
     else:
-        st.info("⏳ No analysis results yet. Go to 'Sample Mapping' tab and click 'Run Full Analysis Now'")
-        
+        st.warning("⚠️ Run the analysis in the 'Analysis' tab first.")
     
 # ==================== TAB 5: EXPORT ====================
 with tab5:

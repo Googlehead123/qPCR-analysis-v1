@@ -613,27 +613,36 @@ class GraphGenerator:
         # Custom y-axis label with bold red gene name
         y_label_html = f"Relative <b style='color:red;'>{gene}</b> Expression Level"
         
-        # Y-axis configuration (lines added in layout, not here)
+        # Y-axis configuration - ensure bars start at baseline (0)
         y_axis_config = dict(
             title=dict(
                 text=y_label_html,
                 font=dict(size=settings.get(f"{gene}_ylabel_size", 14))
             ),
             showgrid=False,
-            zeroline=False
+            zeroline=False,
+            rangemode='tozero'  # CRITICAL: Forces y-axis to include 0 and start from it
         )
         
         if settings.get('y_log_scale'):
             y_axis_config['type'] = 'log'
         
+        # Explicit range handling
         if settings.get('y_min') is not None or settings.get('y_max') is not None:
             y_range = []
             if settings.get('y_min') is not None:
                 y_range.append(settings['y_min'])
+            else:
+                y_range.append(0)  # Default to 0 if min not specified
+            
             if settings.get('y_max') is not None:
                 y_range.append(settings['y_max'])
+            
             if len(y_range) == 2:
                 y_axis_config['range'] = y_range
+        else:
+            # If no manual range, ensure it starts at 0
+            y_axis_config['range'] = [0, None]  # Start at 0, auto-calculate max
         
         # Get gene-specific settings
         gene_bar_gap = settings.get(f"{gene}_bar_gap", settings.get('bar_gap', 0.15))
@@ -677,7 +686,7 @@ class GraphGenerator:
                 tickfont=dict(size=gene_tick_size),
                 tickangle=0,
                 showline=True,          # Show x-axis line
-                linewidth=1,         # Normal weight (not bold)
+                linewidth=1,     # Normal weight (not bold)
                 linecolor='black',
                 mirror=False,           # Only bottom line (not top)
                 side='bottom',
@@ -788,6 +797,24 @@ with tab1:
         if all_data:
             st.session_state.data = pd.concat(all_data, ignore_index=True)
             
+            # Natural sort samples by extracting numbers
+            import re
+            def natural_sort_key(sample_name):
+                """Extract numbers from sample name for natural sorting"""
+                # Convert to string and extract all numbers
+                parts = re.split(r'(\d+)', str(sample_name))
+                # Convert numeric parts to integers for proper sorting
+                return [int(part) if part.isdigit() else part.lower() for part in parts]
+            
+            # Get unique samples and sort them naturally
+            unique_samples = sorted(
+                st.session_state.data['Sample'].unique(),
+                key=natural_sort_key
+            )
+            
+            # Initialize sample_order with naturally sorted samples
+            st.session_state.sample_order = unique_samples
+            
             col1, col2, col3, col4 = st.columns(4)
             col1.metric("Wells", len(st.session_state.data))
             col2.metric("Samples", st.session_state.data['Sample'].nunique())
@@ -804,7 +831,6 @@ with tab1:
             st.subheader("📊 Data Preview")
             st.dataframe(st.session_state.data.head(50), height=300)
             
-
 
 # ==================== TAB 2: SAMPLE MAPPING ====================
 with tab2:
@@ -839,8 +865,22 @@ with tab2:
         st.markdown("---")
         st.markdown("### 🗺️ Sample Condition Mapping")
         
-        samples = [s for s in sorted(st.session_state.data['Sample'].unique()) 
-                  if s not in st.session_state.excluded_samples]
+        # Use sample_order if exists, otherwise get from data with natural sort
+        if 'sample_order' in st.session_state and st.session_state.sample_order:
+            samples = [s for s in st.session_state.sample_order 
+                      if s not in st.session_state.excluded_samples]
+        else:
+            import re
+            def natural_sort_key(sample_name):
+                parts = re.split(r'(\d+)', str(sample_name))
+                return [int(part) if part.isdigit() else part.lower() for part in parts]
+            
+            samples = sorted(
+                [s for s in st.session_state.data['Sample'].unique() 
+                 if s not in st.session_state.excluded_samples],
+                key=natural_sort_key
+            )
+            st.session_state.sample_order = samples
         
         # Group type options
         group_types = ['Negative Control', 'Positive Control', 'Treatment']

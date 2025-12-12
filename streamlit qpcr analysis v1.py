@@ -687,13 +687,7 @@ class GraphGenerator:
                 side='bottom',
                 range=[-0.5, n_bars - 0.5]
             ),
-            yaxis=dict(
-                **y_axis_config,
-                showline=True,
-                linewidth=1.5,
-                linecolor='black',
-                mirror=False
-            ),
+            yaxis=y_axis_config,  # Just use the config directly, no additional line
             template=settings.get('color_scheme', 'plotly_white'),
             font=dict(size=settings.get('font_size', 14)),
             height=settings.get('figure_height', 600),

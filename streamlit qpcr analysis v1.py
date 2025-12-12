@@ -678,18 +678,22 @@ class GraphGenerator:
                 showgrid=False,
                 zeroline=False,
                 tickmode='array',
-                tickvals=list(range(n_bars)),  # All indices
-                ticktext=wrapped_labels,        # All labels
+                tickvals=list(range(n_bars)),
+                ticktext=wrapped_labels,
                 tickfont=dict(size=gene_tick_size),
                 tickangle=0,
-                showline=True,          # Show x-axis line
-                linewidth=1,     # Normal weight (not bold)
-                linecolor='black',
-                mirror=False,           # Only bottom line (not top)
+                showline=False,       # CHANGED: Hide x-axis line
+                mirror=False,
                 side='bottom',
-                range=[-0.5, n_bars - 0.5]  # CRITICAL: Proper range to show all bars
+                range=[-0.5, n_bars - 0.5]
             ),
-            yaxis=y_axis_config,  # Just use the config directly, no additional line
+            yaxis=dict(
+                **y_axis_config,
+                showline=True,
+                linewidth=1.5,
+                linecolor='black',
+                mirror=False
+            ),
             template=settings.get('color_scheme', 'plotly_white'),
             font=dict(size=settings.get('font_size', 14)),
             height=settings.get('figure_height', 600),

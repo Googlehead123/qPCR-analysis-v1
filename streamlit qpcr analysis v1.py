@@ -614,9 +614,9 @@ class GraphGenerator:
             showgrid=False,
             zeroline=False,
             showline=True,        # THICK AXIS BORDER
-            linewidth=3,          # THICK AXIS BORDER
+            linewidth=1,          # THICK AXIS BORDER
             linecolor='black',    # THICK AXIS BORDER
-            mirror=True           # THICK AXIS BORDER
+            mirror=False      # THICK AXIS BORDER
         )
         
         if settings.get('y_log_scale'):
@@ -671,11 +671,12 @@ class GraphGenerator:
                 tickvals=list(range(len(gene_data_indexed))),
                 ticktext=wrapped_labels,
                 tickfont=dict(size=gene_tick_size),
-                tickangle=0,          # HORIZONTAL LABELS
-                showline=True,        # THICK AXIS BORDER
-                linewidth=3,          # THICK AXIS BORDER
-                linecolor='black',    # THICK AXIS BORDER
-                mirror=True           # THICK AXIS BORDER
+                tickangle=0,
+                showline=True,        # Show x-axis line
+                linewidth=1,        # Normal weight (not bold)
+                linecolor='black',
+                mirror=False,         # CHANGED: Only bottom line, not top
+                side='bottom'         # Ensure it's at the bottom
             ),
             yaxis=y_axis_config,
             template=settings.get('color_scheme', 'plotly_white'),

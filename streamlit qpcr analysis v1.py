@@ -626,7 +626,7 @@ class GraphGenerator:
                 font=dict(size=settings.get(f"{gene}_ylabel_size", 14))
             ),
             showgrid=False,
-            zeroline=False,        # CHANGED: Show horizontal line at y=0
+            zeroline=True,        # CHANGED: Show horizontal line at y=0
             zerolinewidth=1,    # ADDED: Match y-axis line thickness
             zerolinecolor='black', # ADDED: Black baseline
             range=[0, y_max_auto],

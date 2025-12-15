@@ -633,6 +633,7 @@ class GraphGenerator:
         
         if settings.get('y_log_scale'):
             y_axis_config['type'] = 'log'
+            y_axis_config.pop('range', None)
         
         # Manual range override if user specified
         if settings.get('y_min') is not None or settings.get('y_max') is not None:
@@ -687,7 +688,13 @@ class GraphGenerator:
                 side='bottom',
                 range=[-0.5, n_bars - 0.5]
             ),
-            yaxis=y_axis_config,  # Just use the config directly, no additional line
+            yaxis=dict(
+                **y_axis_config,
+                showline=True,        # SHOW y-axis border line
+                linewidth=1,        # Normal line weight
+                linecolor='black',    # Black border
+                mirror=False          # Only left side, NOT right
+            ),
             template=settings.get('color_scheme', 'plotly_white'),
             font=dict(size=settings.get('font_size', 14)),
             height=settings.get('figure_height', 600),

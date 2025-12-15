@@ -657,7 +657,7 @@ class GraphGenerator:
             x=1.0, y=-0.15,
             xanchor='right', yanchor='top',
             showarrow=False,
-            font=dict(size=10, color='#666666', family='Arial'),
+            font=dict(size=14, color='#666666', family='Arial'),
             bgcolor='rgba(255,255,255,0.9)',
             bordercolor='#CCCCCC',
             borderwidth=1,

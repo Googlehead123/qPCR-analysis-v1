@@ -618,8 +618,7 @@ class GraphGenerator:
         max_error = error_array.max() if len(error_array) > 0 else 0
         y_max_auto = max_y_value + max_error + (max_y_value * 0.15)  # Add 15% padding for stars
         
-        # Y-axis configuration - CRITICAL: Explicit range starting at EXACTLY 0
-        # Y-axis configuration with baseline
+        # Y-axis configuration
         y_axis_config = dict(
             title=dict(
                 text=y_label_html,

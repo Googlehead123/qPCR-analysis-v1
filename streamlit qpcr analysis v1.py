@@ -2911,7 +2911,8 @@ with tab6:
                         st.success("✅ Presentation generated successfully!")
                         
                 except ImportError as e:
-                    st.error("❌ python-pptx is not installed. Run: `pip install python-pptx`")
+                    st.error(f"❌ Import error: {str(e)}")
+                    st.info("💡 If on Streamlit Cloud, try rebooting the app to reinstall dependencies.")
                 except Exception as e:
                     st.error(f"❌ Error generating presentation: {str(e)}")
         

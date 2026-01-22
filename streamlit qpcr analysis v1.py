@@ -2,14 +2,14 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
-import plotly.express as px
 from scipy import stats
 import io
+import warnings
 import json
 import re
 import zipfile
 from datetime import datetime
-from typing import Dict, List, Tuple
+from typing import Dict, Tuple
 
 # ==================== UTILITY FUNCTIONS ====================
 def natural_sort_key(sample_name):
@@ -32,7 +32,7 @@ DEFAULT_GROUP_COLORS = {
 }
 
 # ==================== SESSION STATE INIT ====================
-for key in ['data', 'processed_data', 'sample_mapping', 'analysis_templates', 'graphs', 
+for key in ['data', 'processed_data', 'sample_mapping', 'analysis_templates', 'graphs',
             'excluded_wells', 'excluded_samples', 'selected_efficacy', 'hk_gene']:
     if key not in st.session_state:
         st.session_state[key] = {} if key in ['sample_mapping', 'analysis_templates', 'graphs'] else (set() if 'excluded' in key else None)
@@ -207,15 +207,26 @@ class QPCRParser:
         
         return parsed.dropna(subset=['CT']).query('Sample.notna() & Target.notna()')
     
+    MAX_FILE_SIZE_MB = 50
+    
     @staticmethod
     def parse(file):
         try:
+            file.seek(0, 2)
+            file_size_mb = file.tell() / (1024 * 1024)
+            file.seek(0)
+            
+            if file_size_mb > QPCRParser.MAX_FILE_SIZE_MB:
+                st.error(f"File too large ({file_size_mb:.1f} MB). Maximum size is {QPCRParser.MAX_FILE_SIZE_MB} MB.")
+                return None
+            
             df = None
             for enc in ['utf-8', 'latin-1', 'cp1252']:
                 try:
                     df = pd.read_csv(file, encoding=enc, low_memory=False, skip_blank_lines=False)
                     break
                 except UnicodeDecodeError:
+                    file.seek(0)
                     continue
             
             if df is None:
@@ -596,15 +607,17 @@ class AnalysisEngine:
                         continue
                     
                     try:
-                        if ref_vals.size >= 2 and vals.size >= 2:
-                            _, p_val = stats.ttest_ind(ref_vals, vals, equal_var=False)
-                        elif vals.size == 1 and ref_vals.size >= 2:
-                            _, p_val = stats.ttest_1samp(ref_vals, vals[0])
-                        elif ref_vals.size == 1 and vals.size >= 2:
-                            _, p_val = stats.ttest_1samp(vals, ref_vals[0])
-                        else:
-                            p_val = np.nan
-                    except (ValueError, TypeError, RuntimeWarning) as e:
+                        with warnings.catch_warnings():
+                            warnings.simplefilter("ignore", RuntimeWarning)
+                            if ref_vals.size >= 2 and vals.size >= 2:
+                                _, p_val = stats.ttest_ind(ref_vals, vals, equal_var=False)
+                            elif vals.size == 1 and ref_vals.size >= 2:
+                                _, p_val = stats.ttest_1samp(ref_vals, vals[0])
+                            elif ref_vals.size == 1 and vals.size >= 2:
+                                _, p_val = stats.ttest_1samp(vals, ref_vals[0])
+                            else:
+                                p_val = np.nan
+                    except (ValueError, TypeError) as e:
                         p_val = np.nan
                     
                     mask = (results["Target"] == target) & (results["Condition"] == cond)
@@ -627,15 +640,17 @@ class AnalysisEngine:
                             continue
                         
                         try:
-                            if ref_vals_2.size >= 2 and vals.size >= 2:
-                                _, p_val_2 = stats.ttest_ind(ref_vals_2, vals, equal_var=False)
-                            elif vals.size == 1 and ref_vals_2.size >= 2:
-                                _, p_val_2 = stats.ttest_1samp(ref_vals_2, vals[0])
-                            elif ref_vals_2.size == 1 and vals.size >= 2:
-                                _, p_val_2 = stats.ttest_1samp(vals, ref_vals_2[0])
-                            else:
-                                p_val_2 = np.nan
-                        except (ValueError, TypeError, RuntimeWarning) as e:
+                            with warnings.catch_warnings():
+                                warnings.simplefilter("ignore", RuntimeWarning)
+                                if ref_vals_2.size >= 2 and vals.size >= 2:
+                                    _, p_val_2 = stats.ttest_ind(ref_vals_2, vals, equal_var=False)
+                                elif vals.size == 1 and ref_vals_2.size >= 2:
+                                    _, p_val_2 = stats.ttest_1samp(ref_vals_2, vals[0])
+                                elif ref_vals_2.size == 1 and vals.size >= 2:
+                                    _, p_val_2 = stats.ttest_1samp(vals, ref_vals_2[0])
+                                else:
+                                    p_val_2 = np.nan
+                        except (ValueError, TypeError) as e:
                             p_val_2 = np.nan
                         
                         mask = (results["Target"] == target) & (results["Condition"] == cond)
@@ -844,8 +859,8 @@ class GraphGenerator:
             
             # Apply categorical ordering
             gene_data['Condition'] = pd.Categorical(
-                gene_data['Condition'], 
-                categories=condition_order, 
+                gene_data['Condition'],
+                categories=condition_order,
                 ordered=True
             )
             gene_data = gene_data.sort_values('Condition')
@@ -1121,7 +1136,7 @@ class GraphGenerator:
         return fig
 
 # ==================== EXPORT FUNCTIONS ====================
-def export_to_excel(raw_data: pd.DataFrame, processed_data: Dict[str, pd.DataFrame], 
+def export_to_excel(raw_data: pd.DataFrame, processed_data: Dict[str, pd.DataFrame],
                    params: dict, mapping: dict) -> bytes:
     """Export comprehensive Excel with gene-by-gene sheets"""
     output = io.BytesIO()
@@ -1231,6 +1246,10 @@ with tab1:
         
         if all_data:
             st.session_state.data = pd.concat(all_data, ignore_index=True)
+            # Clear stale analysis results when new data is uploaded
+            st.session_state.processed_data = {}
+            st.session_state.graphs = {}
+            st.session_state.sample_mapping = {}
             
             unique_samples = sorted(
                 st.session_state.data['Sample'].unique(),
@@ -1252,7 +1271,7 @@ with tab1:
             col3.metric("Genes", st.session_state.data['Target'].nunique())
             
             # Detect housekeeping gene
-            hk_genes = [g for g in st.session_state.data['Target'].unique() 
+            hk_genes = [g for g in st.session_state.data['Target'].unique()
                        if g.upper() in ['ACTIN', 'B-ACTIN', 'GAPDH', 'ACTB']]
             if hk_genes:
                 st.session_state.hk_gene = st.selectbox("🔬 Housekeeping Gene", hk_genes, key='hk_select')
@@ -1332,7 +1351,7 @@ with tab_qc:
         with qc_col1:
             st.subheader("🧪 Plate Heatmap")
             plate_fig = QualityControl.create_plate_heatmap(
-                data, 
+                data,
                 value_col='CT',
                 excluded_wells=st.session_state.excluded_wells
             )
@@ -1361,7 +1380,7 @@ with tab_qc:
         st.subheader("⚠️ Flagged Wells")
         
         qc_results = QualityControl.detect_outliers(data, hk_gene)
-        flagged = qc_results[qc_results['Flagged'] == True].copy()
+        flagged = qc_results[qc_results['Flagged']].copy()
         
         if len(flagged) > 0:
             st.warning(f"Found {len(flagged)} wells with potential issues")
@@ -1527,9 +1546,9 @@ with tab2:
         for sample in st.session_state.sample_order:
             if sample not in st.session_state.sample_mapping:
                 st.session_state.sample_mapping[sample] = {
-                    'condition': sample, 
-                    'group': 'Treatment', 
-                    'concentration': '', 
+                    'condition': sample,
+                    'group': 'Treatment',
+                    'concentration': '',
                     'include': True
                 }
             if 'include' not in st.session_state.sample_mapping[sample]:
@@ -1563,7 +1582,7 @@ with tab2:
                 # Include checkbox
                 with col0:
                     include = st.checkbox(
-                        "", 
+                        "",
                         value=st.session_state.sample_mapping[sample].get('include', True),
                         key=f"include_{sample}_{i}",  # FIXED: Add index to make unique
                         label_visibility="collapsed"
@@ -1631,7 +1650,7 @@ with tab2:
         
         # Update excluded_samples from include flags
         st.session_state.excluded_samples = set([
-            s for s, v in st.session_state.sample_mapping.items() 
+            s for s, v in st.session_state.sample_mapping.items()
             if not v.get('include', True)
         ])
         
@@ -1642,7 +1661,7 @@ with tab2:
         col_card1, col_card2, col_card3, col_card4 = st.columns(4)
         
         total_samples = len(st.session_state.sample_order)
-        included = sum(1 for s in st.session_state.sample_order 
+        included = sum(1 for s in st.session_state.sample_order
                       if st.session_state.sample_mapping[s].get('include', True))
         excluded = total_samples - included
         
@@ -1653,7 +1672,7 @@ with tab2:
         with col_card3:
             st.metric("Excluded", excluded, delta=None if excluded == 0 else f"+{excluded}")
         with col_card4:
-            groups = set(v['group'] for v in st.session_state.sample_mapping.values() 
+            groups = set(v['group'] for v in st.session_state.sample_mapping.values()
                         if v.get('include', True))
             st.metric("Groups", len(groups))
         
@@ -1671,7 +1690,7 @@ with tab2:
             ])
             st.dataframe(mapping_df, use_container_width=True, hide_index=True)
         
-        # Run analysis   
+        # Run analysis
         st.markdown("---")
         st.subheader("🔬 Run Full Analysis (ΔΔCt + Statistics)")
         
@@ -1769,7 +1788,7 @@ with tab2:
             # Run button
             if st.button("▶️ Run Full Analysis Now", type="primary", use_container_width=True):
                 ok = AnalysisEngine.run_full_analysis(
-                    ref_sample_key, 
+                    ref_sample_key,
                     cmp_sample_key,
                     cmp_sample_key_2 if use_second_comparison else None
                 )
@@ -1813,7 +1832,7 @@ with tab3:
                         st.caption(f"Expected: {'↑ Increase' if direction == 'up' else '↓ Decrease'}")
                 
                 # Display columns
-                display_cols = ['Condition', 'Group', 'Fold_Change', 'p_value', 'significance', 
+                display_cols = ['Condition', 'Group', 'Fold_Change', 'p_value', 'significance',
                               'n_replicates', 'Target_Ct_Mean', 'HK_Ct_Mean', 'Delta_Ct', 'SEM']
                 
                 # Filter to existing columns
@@ -1947,7 +1966,7 @@ with tab4:
         
         st.markdown("""
         <style>
-        .gene-pill { display: inline-block; padding: 8px 16px; margin: 2px; border-radius: 20px; 
+        .gene-pill { display: inline-block; padding: 8px 16px; margin: 2px; border-radius: 20px;
                      font-weight: 600; cursor: pointer; transition: all 0.2s; }
         .gene-pill-active { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; }
         .gene-pill-inactive { background: #f0f2f6; color: #333; }
@@ -1996,7 +2015,7 @@ with tab4:
             st.session_state.graph_settings[show_err_key] = err_on
         
         with toolbar_cols[2]:
-            gap_val = st.select_slider("Gap", options=[0.1, 0.15, 0.2, 0.25, 0.3, 0.4], 
+            gap_val = st.select_slider("Gap", options=[0.1, 0.15, 0.2, 0.25, 0.3, 0.4],
                                        value=st.session_state.graph_settings[bar_gap_key],
                                        key=f"gap_sl_{current_gene}")
             st.session_state.graph_settings[bar_gap_key] = gap_val

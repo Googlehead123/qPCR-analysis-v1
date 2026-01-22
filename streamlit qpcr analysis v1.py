@@ -1135,6 +1135,310 @@ class GraphGenerator:
         
         return fig
 
+# ==================== REPORT GENERATOR (PPT) ====================
+class ReportGenerator:
+    
+    SLIDE_WIDTH_INCHES = 13.333
+    SLIDE_HEIGHT_INCHES = 7.5
+    
+    @staticmethod
+    def create_presentation(
+        graphs: Dict[str, go.Figure],
+        processed_data: Dict[str, pd.DataFrame],
+        analysis_params: dict,
+        layout: str = "one_per_slide",
+        include_title_slide: bool = True,
+        include_summary: bool = True
+    ) -> bytes:
+        try:
+            from pptx import Presentation
+            from pptx.util import Inches, Pt
+            from pptx.dml.color import RgbColor
+            from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
+        except ImportError:
+            raise ImportError("python-pptx is required. Install with: pip install python-pptx")
+        
+        prs = Presentation()
+        prs.slide_width = Inches(ReportGenerator.SLIDE_WIDTH_INCHES)
+        prs.slide_height = Inches(ReportGenerator.SLIDE_HEIGHT_INCHES)
+        
+        blank_layout = prs.slide_layouts[6]
+        
+        if include_title_slide:
+            ReportGenerator._add_title_slide(prs, analysis_params)
+        
+        if layout == "one_per_slide":
+            for gene, fig in graphs.items():
+                gene_data = processed_data.get(gene)
+                ReportGenerator._add_gene_slide(prs, blank_layout, gene, fig, gene_data)
+        elif layout == "two_per_slide":
+            gene_list = list(graphs.items())
+            for i in range(0, len(gene_list), 2):
+                pair = gene_list[i:i+2]
+                ReportGenerator._add_dual_gene_slide(prs, blank_layout, pair, processed_data)
+        elif layout == "grid":
+            ReportGenerator._add_grid_slide(prs, blank_layout, graphs)
+        
+        if include_summary:
+            ReportGenerator._add_summary_slide(prs, blank_layout, processed_data, analysis_params)
+        
+        output = io.BytesIO()
+        prs.save(output)
+        output.seek(0)
+        return output.getvalue()
+    
+    @staticmethod
+    def _add_title_slide(prs, analysis_params: dict):
+        from pptx.util import Inches, Pt
+        from pptx.enum.text import PP_ALIGN
+        
+        slide = prs.slides.add_slide(prs.slide_layouts[6])
+        
+        title_box = slide.shapes.add_textbox(Inches(0.5), Inches(2.5), Inches(12.33), Inches(1))
+        title_frame = title_box.text_frame
+        title_para = title_frame.paragraphs[0]
+        title_para.text = "qPCR Gene Expression Analysis"
+        title_para.font.size = Pt(44)
+        title_para.font.bold = True
+        title_para.alignment = PP_ALIGN.CENTER
+        
+        subtitle_box = slide.shapes.add_textbox(Inches(0.5), Inches(3.8), Inches(12.33), Inches(0.5))
+        subtitle_frame = subtitle_box.text_frame
+        subtitle_para = subtitle_frame.paragraphs[0]
+        efficacy = analysis_params.get('Efficacy_Type', 'Analysis')
+        subtitle_para.text = f"{efficacy} Efficacy Study"
+        subtitle_para.font.size = Pt(28)
+        subtitle_para.alignment = PP_ALIGN.CENTER
+        
+        info_box = slide.shapes.add_textbox(Inches(0.5), Inches(5.5), Inches(12.33), Inches(1))
+        info_frame = info_box.text_frame
+        info_para = info_frame.paragraphs[0]
+        date = analysis_params.get('Date', datetime.now().strftime("%Y-%m-%d"))
+        hk = analysis_params.get('Housekeeping_Gene', 'N/A')
+        ref = analysis_params.get('Reference_Sample', 'N/A')
+        info_para.text = f"Date: {date}  |  HK Gene: {hk}  |  Reference: {ref}"
+        info_para.font.size = Pt(14)
+        info_para.alignment = PP_ALIGN.CENTER
+    
+    @staticmethod
+    def _add_gene_slide(prs, layout, gene: str, fig: go.Figure, gene_data: pd.DataFrame = None):
+        from pptx.util import Inches, Pt
+        from pptx.enum.text import PP_ALIGN
+        
+        slide = prs.slides.add_slide(layout)
+        
+        title_box = slide.shapes.add_textbox(Inches(0.3), Inches(0.2), Inches(12.73), Inches(0.6))
+        title_frame = title_box.text_frame
+        title_para = title_frame.paragraphs[0]
+        title_para.text = f"{gene} Expression"
+        title_para.font.size = Pt(28)
+        title_para.font.bold = True
+        title_para.alignment = PP_ALIGN.LEFT
+        
+        fig_copy = go.Figure(fig)
+        fig_copy.update_layout(
+            width=1000,
+            height=550,
+            margin=dict(l=60, r=60, t=60, b=80),
+            font=dict(size=14)
+        )
+        
+        img_bytes = fig_copy.to_image(format="png", scale=2)
+        img_stream = io.BytesIO(img_bytes)
+        
+        left = Inches(0.5)
+        top = Inches(0.9)
+        width = Inches(9.5)
+        slide.shapes.add_picture(img_stream, left, top, width=width)
+        
+        if gene_data is not None and not gene_data.empty:
+            stats_box = slide.shapes.add_textbox(Inches(10.2), Inches(1.0), Inches(2.8), Inches(5.5))
+            stats_frame = stats_box.text_frame
+            stats_frame.word_wrap = True
+            
+            header_para = stats_frame.paragraphs[0]
+            header_para.text = "Statistics"
+            header_para.font.size = Pt(14)
+            header_para.font.bold = True
+            
+            for _, row in gene_data.iterrows():
+                cond = row.get('Condition', 'N/A')
+                fc = row.get('Fold_Change', row.get('Relative_Expression', 0))
+                pval = row.get('p_value', float('nan'))
+                sig = row.get('significance', '')
+                
+                para = stats_frame.add_paragraph()
+                para.text = f"{cond[:12]}"
+                para.font.size = Pt(10)
+                para.font.bold = True
+                
+                para2 = stats_frame.add_paragraph()
+                fc_str = f"FC: {fc:.2f}" if pd.notna(fc) else "FC: N/A"
+                p_str = f"p={pval:.3f}" if pd.notna(pval) else ""
+                para2.text = f"  {fc_str} {sig}"
+                para2.font.size = Pt(9)
+    
+    @staticmethod
+    def _add_dual_gene_slide(prs, layout, gene_pairs: list, processed_data: dict):
+        from pptx.util import Inches, Pt
+        from pptx.enum.text import PP_ALIGN
+        
+        slide = prs.slides.add_slide(layout)
+        
+        positions = [
+            (Inches(0.3), Inches(0.8), Inches(6.2)),
+            (Inches(6.8), Inches(0.8), Inches(6.2))
+        ]
+        
+        for idx, (gene, fig) in enumerate(gene_pairs):
+            if idx >= 2:
+                break
+            
+            left, top, width = positions[idx]
+            
+            title_box = slide.shapes.add_textbox(left, Inches(0.2), width, Inches(0.5))
+            title_frame = title_box.text_frame
+            title_para = title_frame.paragraphs[0]
+            title_para.text = f"{gene}"
+            title_para.font.size = Pt(20)
+            title_para.font.bold = True
+            
+            fig_copy = go.Figure(fig)
+            fig_copy.update_layout(
+                width=600,
+                height=450,
+                margin=dict(l=50, r=30, t=40, b=60),
+                font=dict(size=11)
+            )
+            
+            img_bytes = fig_copy.to_image(format="png", scale=2)
+            img_stream = io.BytesIO(img_bytes)
+            
+            slide.shapes.add_picture(img_stream, left, top, width=width)
+    
+    @staticmethod
+    def _add_grid_slide(prs, layout, graphs: dict):
+        from pptx.util import Inches, Pt
+        from pptx.enum.text import PP_ALIGN
+        
+        slide = prs.slides.add_slide(layout)
+        
+        title_box = slide.shapes.add_textbox(Inches(0.3), Inches(0.1), Inches(12.73), Inches(0.5))
+        title_frame = title_box.text_frame
+        title_para = title_frame.paragraphs[0]
+        title_para.text = "Gene Expression Overview"
+        title_para.font.size = Pt(24)
+        title_para.font.bold = True
+        
+        gene_list = list(graphs.items())
+        n_genes = len(gene_list)
+        
+        if n_genes <= 2:
+            cols, rows = 2, 1
+        elif n_genes <= 4:
+            cols, rows = 2, 2
+        elif n_genes <= 6:
+            cols, rows = 3, 2
+        else:
+            cols, rows = 4, 2
+        
+        cell_width = 12.5 / cols
+        cell_height = 6.5 / rows
+        
+        for idx, (gene, fig) in enumerate(gene_list[:cols*rows]):
+            col_idx = idx % cols
+            row_idx = idx // cols
+            
+            left = Inches(0.4 + col_idx * cell_width)
+            top = Inches(0.7 + row_idx * cell_height)
+            
+            fig_copy = go.Figure(fig)
+            fig_copy.update_layout(
+                width=350,
+                height=280,
+                margin=dict(l=40, r=20, t=35, b=40),
+                font=dict(size=9),
+                title=dict(text=gene, font=dict(size=12))
+            )
+            
+            img_bytes = fig_copy.to_image(format="png", scale=2)
+            img_stream = io.BytesIO(img_bytes)
+            
+            slide.shapes.add_picture(img_stream, left, top, width=Inches(cell_width - 0.2))
+    
+    @staticmethod
+    def _add_summary_slide(prs, layout, processed_data: dict, analysis_params: dict):
+        from pptx.util import Inches, Pt
+        from pptx.enum.text import PP_ALIGN
+        
+        slide = prs.slides.add_slide(layout)
+        
+        title_box = slide.shapes.add_textbox(Inches(0.3), Inches(0.2), Inches(12.73), Inches(0.6))
+        title_frame = title_box.text_frame
+        title_para = title_frame.paragraphs[0]
+        title_para.text = "Analysis Summary"
+        title_para.font.size = Pt(28)
+        title_para.font.bold = True
+        
+        all_results = pd.concat(processed_data.values(), ignore_index=True) if processed_data else pd.DataFrame()
+        
+        summary_box = slide.shapes.add_textbox(Inches(0.5), Inches(1.0), Inches(6), Inches(5.5))
+        summary_frame = summary_box.text_frame
+        summary_frame.word_wrap = True
+        
+        header = summary_frame.paragraphs[0]
+        header.text = "Experimental Parameters"
+        header.font.size = Pt(16)
+        header.font.bold = True
+        
+        params_text = [
+            f"Efficacy Type: {analysis_params.get('Efficacy_Type', 'N/A')}",
+            f"Housekeeping Gene: {analysis_params.get('Housekeeping_Gene', 'N/A')}",
+            f"Reference Condition: {analysis_params.get('Reference_Sample', 'N/A')}",
+            f"Comparison Condition: {analysis_params.get('Compare_To', 'N/A')}",
+            f"Genes Analyzed: {len(processed_data)}",
+            f"Analysis Date: {analysis_params.get('Date', 'N/A')}"
+        ]
+        
+        for text in params_text:
+            para = summary_frame.add_paragraph()
+            para.text = text
+            para.font.size = Pt(12)
+        
+        if not all_results.empty:
+            results_box = slide.shapes.add_textbox(Inches(7), Inches(1.0), Inches(5.8), Inches(5.5))
+            results_frame = results_box.text_frame
+            results_frame.word_wrap = True
+            
+            header2 = results_frame.paragraphs[0]
+            header2.text = "Key Findings"
+            header2.font.size = Pt(16)
+            header2.font.bold = True
+            
+            for gene, gene_df in processed_data.items():
+                if gene_df.empty:
+                    continue
+                
+                para = results_frame.add_paragraph()
+                para.text = f"\n{gene}:"
+                para.font.size = Pt(12)
+                para.font.bold = True
+                
+                sig_results = gene_df[gene_df.get('significance', pd.Series([''])).str.len() > 0]
+                if not sig_results.empty:
+                    for _, row in sig_results.head(3).iterrows():
+                        cond = row.get('Condition', 'N/A')
+                        fc = row.get('Fold_Change', row.get('Relative_Expression', 0))
+                        sig = row.get('significance', '')
+                        para2 = results_frame.add_paragraph()
+                        para2.text = f"  {cond}: {fc:.2f}x {sig}"
+                        para2.font.size = Pt(10)
+                else:
+                    para2 = results_frame.add_paragraph()
+                    para2.text = "  No significant changes"
+                    para2.font.size = Pt(10)
+
+
 # ==================== EXPORT FUNCTIONS ====================
 def export_to_excel(raw_data: pd.DataFrame, processed_data: Dict[str, pd.DataFrame],
                    params: dict, mapping: dict) -> bytes:
@@ -1227,7 +1531,7 @@ with st.sidebar:
         """)
 
 # Main tabs
-tab1, tab_qc, tab2, tab3, tab4, tab5 = st.tabs(["📁 Upload", "🔍 QC Check", "🗺️ Mapping", "🔬 Analysis", "📊 Graphs", "📤 Export"])
+tab1, tab_qc, tab2, tab3, tab4, tab5, tab6 = st.tabs(["📁 Upload", "🔍 QC Check", "🗺️ Mapping", "🔬 Analysis", "📊 Graphs", "📤 Export", "📑 PPT Report"])
 
 # ==================== TAB 1: UPLOAD & FILTER ====================
 with tab1:
@@ -1882,10 +2186,8 @@ with tab3:
 with tab4:
     st.header("Step 4: Individual Gene Graphs")
     
-    # === COMPACT CSS STYLING ===
     st.markdown("""
     <style>
-    /* Make graphs POP */
     [data-testid="stPlotlyChart"] {
         box-shadow: 0 4px 12px rgba(0,0,0,0.15);
         border-radius: 8px;
@@ -1893,72 +2195,29 @@ with tab4:
         padding: 10px;
     }
     
-    /* Compact control panels */
     .stExpander {
         background-color: #FAFAFA;
         border-left: 3px solid #E0E0E0;
         margin-bottom: 5px;
     }
     
-    /* Reduce all font sizes in controls column */
-    [data-testid="column"]:first-child {
-        font-size: 11px;
+    .gene-selector-btn {
+        transition: all 0.2s ease;
     }
     
-    [data-testid="column"]:first-child h3 {
-        font-size: 14px;
-        margin-top: 5px;
-        margin-bottom: 5px;
+    .graph-toolbar {
+        background: linear-gradient(135deg, #f5f7fa 0%, #e8ecf1 100%);
+        padding: 12px 16px;
+        border-radius: 8px;
+        margin-bottom: 16px;
     }
     
-    [data-testid="column"]:first-child h4 {
-        font-size: 12px;
-        margin-top: 8px;
-        margin-bottom: 5px;
-    }
-    
-    /* Compact checkboxes */
-    [data-testid="column"]:first-child .stCheckbox {
-        margin-bottom: 5px;
-    }
-    
-    /* Compact sliders */
-    [data-testid="column"]:first-child .stSlider {
-        margin-bottom: 5px;
-    }
-    
-    /* Compact expanders */
-    [data-testid="column"]:first-child [data-testid="stExpander"] {
-        font-size: 10px;
-        padding: 2px;
-    }
-    
-    /* Compact buttons */
-    [data-testid="column"]:first-child button {
-        font-size: 10px;
-        padding: 2px 8px;
-        height: 28px;
-    }
-    
-    /* Compact color picker */
-    [data-testid="column"]:first-child input[type="color"] {
-        height: 25px;
-    }
-    
-    /* Make graph column stand out */
-    [data-testid="column"]:last-child {
-        background: linear-gradient(to right, #F8F9FA, #FFFFFF);
-        padding: 20px;
-        border-radius: 10px;
-    }
-    
-    /* Emphasize gene titles */
-    h2 {
-        font-weight: 700;
-        letter-spacing: 0.5px;
-        background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
+    .stat-highlight {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 4px 8px;
+        border-radius: 4px;
+        font-weight: 600;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -2071,38 +2330,89 @@ with tab4:
         
         if edit_mode:
             with st.expander("🎨 Bar Color & Visibility Editor", expanded=True):
+                st.markdown("""
+                <style>
+                .color-editor-card {
+                    background: #f8f9fa;
+                    border: 1px solid #e9ecef;
+                    border-radius: 8px;
+                    padding: 12px;
+                    margin-bottom: 8px;
+                }
+                .color-editor-title {
+                    font-size: 13px;
+                    font-weight: 600;
+                    color: #333;
+                    margin-bottom: 4px;
+                    white-space: nowrap;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                }
+                .color-editor-subtitle {
+                    font-size: 11px;
+                    color: #666;
+                    margin-bottom: 8px;
+                }
+                </style>
+                """, unsafe_allow_html=True)
+                
                 n_bars = len(gene_data)
-                n_cols = min(n_bars, 4)
+                n_cols = min(n_bars, 3)
+                
+                st.markdown("#### Individual Bar Settings")
                 color_cols = st.columns(n_cols)
                 
                 for idx, (_, row) in enumerate(gene_data.iterrows()):
                     condition = row['Condition']
                     group = row.get('Group', 'Treatment')
                     bar_key = f"{current_gene}_{condition}"
-                    default_color = DEFAULT_GROUP_COLORS.get(group, '#D3D3D3')
                     
                     with color_cols[idx % n_cols]:
-                        st.markdown(f"<div style='font-size:11px; font-weight:600; margin-bottom:2px;'>{condition[:15]}{'...' if len(condition)>15 else ''}</div>", unsafe_allow_html=True)
-                        st.markdown(f"<div style='font-size:9px; color:#888; margin-bottom:4px;'>{group}</div>", unsafe_allow_html=True)
-                        
-                        c1, c2, c3 = st.columns([2, 1, 1])
-                        with c1:
-                            new_color = st.color_picker("Bar color", st.session_state[f'{current_gene}_bar_settings'][bar_key]['color'],
-                                                        key=f"cp_{current_gene}_{idx}", label_visibility="collapsed")
+                        with st.container():
+                            display_name = condition if len(condition) <= 18 else condition[:15] + "..."
+                            st.markdown(f"""
+                            <div class='color-editor-card'>
+                                <div class='color-editor-title' title='{condition}'>{display_name}</div>
+                                <div class='color-editor-subtitle'>{group}</div>
+                            </div>
+                            """, unsafe_allow_html=True)
+                            
+                            new_color = st.color_picker(
+                                "Color",
+                                st.session_state[f'{current_gene}_bar_settings'][bar_key]['color'],
+                                key=f"cp_{current_gene}_{idx}",
+                                help=f"Bar color for {condition}"
+                            )
                             st.session_state[f'{current_gene}_bar_settings'][bar_key]['color'] = new_color
                             st.session_state.graph_settings['bar_colors_per_sample'][bar_key] = new_color
-                        with c2:
-                            sig_bar = st.checkbox("*", st.session_state[f'{current_gene}_bar_settings'][bar_key]['show_sig'],
-                                                  key=f"sb_{current_gene}_{idx}", help="Show significance")
-                            st.session_state[f'{current_gene}_bar_settings'][bar_key]['show_sig'] = sig_bar
-                        with c3:
-                            err_bar = st.checkbox("±", st.session_state[f'{current_gene}_bar_settings'][bar_key]['show_err'],
-                                                  key=f"eb_{current_gene}_{idx}", help="Show error bar")
-                            st.session_state[f'{current_gene}_bar_settings'][bar_key]['show_err'] = err_bar
+                            
+                            cb_col1, cb_col2 = st.columns(2)
+                            with cb_col1:
+                                sig_bar = st.checkbox(
+                                    "Show *",
+                                    st.session_state[f'{current_gene}_bar_settings'][bar_key]['show_sig'],
+                                    key=f"sb_{current_gene}_{idx}",
+                                    help="Show significance marker"
+                                )
+                                st.session_state[f'{current_gene}_bar_settings'][bar_key]['show_sig'] = sig_bar
+                            with cb_col2:
+                                err_bar = st.checkbox(
+                                    "Show ±",
+                                    st.session_state[f'{current_gene}_bar_settings'][bar_key]['show_err'],
+                                    key=f"eb_{current_gene}_{idx}",
+                                    help="Show error bar"
+                                )
+                                st.session_state[f'{current_gene}_bar_settings'][bar_key]['show_err'] = err_bar
+                            
+                            st.markdown("<div style='margin-bottom: 16px;'></div>", unsafe_allow_html=True)
+                
+                st.markdown("---")
+                st.markdown("#### Quick Color Presets")
+                st.caption("Apply a color scheme to all bars")
                 
                 preset_cols = st.columns(4)
                 with preset_cols[0]:
-                    if st.button("🔵 Blues", key=f"preset_blue_{current_gene}", width="stretch"):
+                    if st.button("🔵 Blues", key=f"preset_blue_{current_gene}", use_container_width=True):
                         blues = ['#e3f2fd', '#90caf9', '#42a5f5', '#1976d2', '#0d47a1']
                         for idx, (_, row) in enumerate(gene_data.iterrows()):
                             bar_key = f"{current_gene}_{row['Condition']}"
@@ -2110,7 +2420,7 @@ with tab4:
                             st.session_state.graph_settings['bar_colors_per_sample'][bar_key] = blues[idx % len(blues)]
                         st.rerun()
                 with preset_cols[1]:
-                    if st.button("🟢 Greens", key=f"preset_green_{current_gene}", width="stretch"):
+                    if st.button("🟢 Greens", key=f"preset_green_{current_gene}", use_container_width=True):
                         greens = ['#e8f5e9', '#a5d6a7', '#66bb6a', '#388e3c', '#1b5e20']
                         for idx, (_, row) in enumerate(gene_data.iterrows()):
                             bar_key = f"{current_gene}_{row['Condition']}"
@@ -2118,7 +2428,7 @@ with tab4:
                             st.session_state.graph_settings['bar_colors_per_sample'][bar_key] = greens[idx % len(greens)]
                         st.rerun()
                 with preset_cols[2]:
-                    if st.button("🔴 Warm", key=f"preset_warm_{current_gene}", width="stretch"):
+                    if st.button("🔴 Warm", key=f"preset_warm_{current_gene}", use_container_width=True):
                         warms = ['#fff3e0', '#ffcc80', '#ff9800', '#f57c00', '#e65100']
                         for idx, (_, row) in enumerate(gene_data.iterrows()):
                             bar_key = f"{current_gene}_{row['Condition']}"
@@ -2126,7 +2436,7 @@ with tab4:
                             st.session_state.graph_settings['bar_colors_per_sample'][bar_key] = warms[idx % len(warms)]
                         st.rerun()
                 with preset_cols[3]:
-                    if st.button("⬜ Grayscale", key=f"preset_gray_{current_gene}", width="stretch"):
+                    if st.button("⬜ Grayscale", key=f"preset_gray_{current_gene}", use_container_width=True):
                         grays = ['#ffffff', '#e0e0e0', '#bdbdbd', '#9e9e9e', '#616161']
                         for idx, (_, row) in enumerate(gene_data.iterrows()):
                             bar_key = f"{current_gene}_{row['Condition']}"
@@ -2507,13 +2817,157 @@ with tab5:
     else:
         st.warning("⚠️ Complete analysis first")
 
+# ==================== TAB 6: PPT REPORT ====================
+with tab6:
+    st.header("Step 6: PowerPoint Presentation Export")
+    
+    st.markdown("""
+    <div style='background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 20px; border-radius: 12px; color: white; margin-bottom: 20px;'>
+        <h3 style='margin: 0; color: white;'>📑 Publication-Ready Presentations</h3>
+        <p style='margin: 8px 0 0 0; opacity: 0.9;'>Generate professional PowerPoint slides with your gene expression graphs</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    if st.session_state.graphs and st.session_state.processed_data:
+        st.subheader("🎨 Presentation Settings")
+        
+        col_layout, col_options = st.columns(2)
+        
+        with col_layout:
+            st.markdown("#### Slide Layout")
+            layout_option = st.radio(
+                "Choose how to arrange graphs:",
+                ["one_per_slide", "two_per_slide", "grid"],
+                format_func=lambda x: {
+                    "one_per_slide": "📊 One graph per slide (best for presentations)",
+                    "two_per_slide": "📊📊 Two graphs per slide (compact)",
+                    "grid": "📋 All graphs on one slide (overview)"
+                }[x],
+                key="ppt_layout"
+            )
+            
+            st.markdown("#### Slide Content")
+            include_title = st.checkbox("Include title slide", value=True, key="ppt_title")
+            include_summary = st.checkbox("Include summary slide", value=True, key="ppt_summary")
+        
+        with col_options:
+            st.markdown("#### Preview")
+            
+            n_genes = len(st.session_state.graphs)
+            
+            if layout_option == "one_per_slide":
+                n_slides = n_genes + (1 if include_title else 0) + (1 if include_summary else 0)
+                st.info(f"📄 **{n_slides} slides** will be generated:\n"
+                        f"- {'1 title slide' if include_title else ''}\n"
+                        f"- {n_genes} gene slides\n"
+                        f"- {'1 summary slide' if include_summary else ''}")
+            elif layout_option == "two_per_slide":
+                gene_slides = (n_genes + 1) // 2
+                n_slides = gene_slides + (1 if include_title else 0) + (1 if include_summary else 0)
+                st.info(f"📄 **{n_slides} slides** will be generated:\n"
+                        f"- {'1 title slide' if include_title else ''}\n"
+                        f"- {gene_slides} gene slides (2 per slide)\n"
+                        f"- {'1 summary slide' if include_summary else ''}")
+            else:
+                n_slides = 1 + (1 if include_title else 0) + (1 if include_summary else 0)
+                st.info(f"📄 **{n_slides} slides** will be generated:\n"
+                        f"- {'1 title slide' if include_title else ''}\n"
+                        f"- 1 overview slide (all genes)\n"
+                        f"- {'1 summary slide' if include_summary else ''}")
+            
+            st.markdown("#### Genes to Include")
+            gene_list = list(st.session_state.graphs.keys())
+            st.write(", ".join([f"**{g}**" for g in gene_list]))
+        
+        st.markdown("---")
+        
+        st.subheader("📥 Generate & Download")
+        
+        gen_col1, gen_col2, gen_col3 = st.columns([2, 1, 1])
+        
+        with gen_col1:
+            if st.button("🚀 Generate PowerPoint Presentation", type="primary", use_container_width=True):
+                try:
+                    with st.spinner("Generating presentation..."):
+                        analysis_params = {
+                            'Date': datetime.now().strftime("%Y-%m-%d %H:%M"),
+                            'Efficacy_Type': st.session_state.get('selected_efficacy', 'qPCR Analysis'),
+                            'Housekeeping_Gene': st.session_state.get('hk_gene', 'N/A'),
+                            'Reference_Sample': st.session_state.get('analysis_ref_condition', 'N/A'),
+                            'Compare_To': st.session_state.get('analysis_cmp_condition', 'N/A'),
+                            'Genes_Analyzed': len(st.session_state.processed_data)
+                        }
+                        
+                        ppt_bytes = ReportGenerator.create_presentation(
+                            graphs=st.session_state.graphs,
+                            processed_data=st.session_state.processed_data,
+                            analysis_params=analysis_params,
+                            layout=layout_option,
+                            include_title_slide=include_title,
+                            include_summary=include_summary
+                        )
+                        
+                        st.session_state['ppt_bytes'] = ppt_bytes
+                        st.success("✅ Presentation generated successfully!")
+                        
+                except ImportError as e:
+                    st.error("❌ python-pptx is not installed. Run: `pip install python-pptx`")
+                except Exception as e:
+                    st.error(f"❌ Error generating presentation: {str(e)}")
+        
+        if 'ppt_bytes' in st.session_state and st.session_state['ppt_bytes']:
+            with gen_col2:
+                efficacy = st.session_state.get('selected_efficacy', 'qPCR')
+                filename = f"qPCR_{efficacy}_{datetime.now().strftime('%Y%m%d_%H%M')}.pptx"
+                
+                st.download_button(
+                    label="📥 Download PPTX",
+                    data=st.session_state['ppt_bytes'],
+                    file_name=filename,
+                    mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                    type="primary",
+                    use_container_width=True
+                )
+        
+        st.markdown("---")
+        
+        with st.expander("💡 Tips for Great Presentations", expanded=False):
+            st.markdown("""
+            **Layout Recommendations:**
+            - **One per slide**: Best for formal presentations, allows detailed discussion of each gene
+            - **Two per slide**: Good for comparing related genes or showing more data in less time
+            - **Grid view**: Great for overview slides or quick reference handouts
+            
+            **After Download:**
+            1. Open in PowerPoint or Google Slides
+            2. Adjust fonts and colors to match your organization's template
+            3. Add additional context or notes as needed
+            4. Consider adding a methods slide manually for complete presentations
+            
+            **For Publications:**
+            - Individual high-resolution images can be downloaded from the Export tab
+            - SVG format is recommended for vector graphics in publications
+            """)
+    
+    else:
+        st.info("⏳ Generate graphs first in the Graphs tab to create a PowerPoint presentation.")
+        
+        st.markdown("""
+        ### How to use:
+        1. **Upload** your qPCR data in the Upload tab
+        2. **Map** your samples to conditions in the Mapping tab
+        3. **Run Analysis** to calculate ΔΔCt values
+        4. **Generate Graphs** in the Graphs tab
+        5. **Return here** to create your PowerPoint presentation
+        """)
+
 # ==================== FOOTER ====================
 st.markdown("---")
 
 footer_html = """
 <div style='text-align: center; color: #666;'>
-    <p>🧬 qPCR Analysis Suite Pro v3.0 | Gene-by-gene analysis with efficacy-specific workflows</p>
-    <p>QC Check • Outlier Detection • Publication-Ready Export • Batch Processing</p>
+    <p>🧬 qPCR Analysis Suite Pro v3.1 | Gene-by-gene analysis with efficacy-specific workflows</p>
+    <p>QC Check • Outlier Detection • Publication-Ready Export • PowerPoint Reports</p>
 </div>
 """
 

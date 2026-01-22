@@ -2821,6 +2821,33 @@ with tab5:
 with tab6:
     st.header("Step 6: PowerPoint Presentation Export")
     
+    pptx_available = False
+    try:
+        from pptx import Presentation as _TestPptx
+        pptx_available = True
+    except ImportError:
+        pass
+    
+    if not pptx_available:
+        st.error("⚠️ PowerPoint export is temporarily unavailable. The python-pptx package failed to load.")
+        with st.expander("🔧 Debug Info"):
+            import sys
+            st.code(f"Python version: {sys.version}")
+            try:
+                import pkg_resources
+                installed = [f"{d.key}=={d.version}" for d in pkg_resources.working_set]
+                pptx_pkgs = [p for p in installed if 'pptx' in p.lower() or 'lxml' in p.lower()]
+                st.write("**Relevant packages:**")
+                if pptx_pkgs:
+                    for p in pptx_pkgs:
+                        st.code(p)
+                else:
+                    st.warning("python-pptx and lxml NOT found in installed packages")
+            except Exception as e:
+                st.error(f"Could not check packages: {e}")
+    else:
+        st.success("✅ PowerPoint export ready")
+    
     st.markdown("""
     <div style='background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 20px; border-radius: 12px; color: white; margin-bottom: 20px;'>
         <h3 style='margin: 0; color: white;'>📑 Publication-Ready Presentations</h3>
@@ -2828,7 +2855,7 @@ with tab6:
     </div>
     """, unsafe_allow_html=True)
     
-    if st.session_state.graphs and st.session_state.processed_data:
+    if st.session_state.graphs and st.session_state.processed_data and pptx_available:
         st.subheader("🎨 Presentation Settings")
         
         col_layout, col_options = st.columns(2)
@@ -2950,7 +2977,7 @@ with tab6:
             - SVG format is recommended for vector graphics in publications
             """)
     
-    else:
+    elif pptx_available:
         st.info("⏳ Generate graphs first in the Graphs tab to create a PowerPoint presentation.")
         
         st.markdown("""

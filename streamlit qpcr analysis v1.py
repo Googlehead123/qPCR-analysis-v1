@@ -1004,8 +1004,11 @@ class AnalysisEngine:
                 combined_sem = np.sqrt(target_sem**2 + hk_sem**2)
 
                 # SEM of relative expression = rel_expr * ln(2) * SEM(ΔCt)
-                # Note: This propagates the error correctly through the exponential transformation
                 sem = rel_expr * np.log(2) * combined_sem
+
+                # SD of relative expression (for error bar option)
+                combined_sd = np.sqrt(target_sd**2 + hk_sd**2)
+                sd = rel_expr * np.log(2) * combined_sd
 
                 # Get original sample name and group
                 original_sample = cond_data["Sample"].iloc[0]
@@ -1029,6 +1032,7 @@ class AnalysisEngine:
                         "Delta_Delta_Ct": ddct,
                         "Relative_Expression": rel_expr,
                         "SEM": sem,
+                        "SD": sd,
                         "Fold_Change": rel_expr,
                     }
                 )
@@ -1043,8 +1047,13 @@ class AnalysisEngine:
         raw_data: pd.DataFrame = None,
         hk_gene: str = None,
         sample_mapping: dict = None,
+        ttest_type: str = "welch",
     ) -> pd.DataFrame:
-        """Two-tailed Welch's t-test comparing each condition to compare_condition (and optionally compare_condition_2)"""
+        """T-test comparing each condition to compare_condition (and optionally compare_condition_2).
+
+        Args:
+            ttest_type: "welch" for Welch's t-test (unequal variance), "student" for Student's t-test (equal variance)
+        """
 
         # Use session_state fallbacks
         raw_data = raw_data if raw_data is not None else st.session_state.get("data")
@@ -1106,22 +1115,16 @@ class AnalysisEngine:
                     try:
                         with warnings.catch_warnings():
                             warnings.simplefilter("ignore", RuntimeWarning)
+                            equal_var = ttest_type == "student"
                             if ref_vals.size >= 2 and vals.size >= 2:
-                                # Standard Welch's t-test for two independent samples
                                 _, p_val = stats.ttest_ind(
-                                    ref_vals, vals, equal_var=False
+                                    ref_vals, vals, equal_var=equal_var
                                 )
                             elif vals.size == 1 and ref_vals.size >= 2:
-                                # Single treatment replicate: test if ref group mean equals this value
-                                # Note: Limited statistical power with n=1
                                 _, p_val = stats.ttest_1samp(ref_vals, vals[0])
                             elif ref_vals.size == 1 and vals.size >= 2:
-                                # Single reference replicate: test if treatment mean equals ref value
-                                # Note: Limited statistical power with n=1
                                 _, p_val = stats.ttest_1samp(vals, ref_vals[0])
                             else:
-                                # Both groups have n=1: cannot compute meaningful p-value
-                                # Intentionally return NaN - statistical comparison not possible
                                 p_val = np.nan
                     except (ValueError, TypeError) as e:
                         p_val = np.nan
@@ -1150,9 +1153,10 @@ class AnalysisEngine:
                         try:
                             with warnings.catch_warnings():
                                 warnings.simplefilter("ignore", RuntimeWarning)
+                                equal_var = ttest_type == "student"
                                 if ref_vals_2.size >= 2 and vals.size >= 2:
                                     _, p_val_2 = stats.ttest_ind(
-                                        ref_vals_2, vals, equal_var=False
+                                        ref_vals_2, vals, equal_var=equal_var
                                     )
                                 elif vals.size == 1 and ref_vals_2.size >= 2:
                                     _, p_val_2 = stats.ttest_1samp(ref_vals_2, vals[0])
@@ -1316,6 +1320,7 @@ class AnalysisEngine:
                     return False
 
                 # --- Statistical test ---
+                ttest_type = st.session_state.get("ttest_type", "welch")
                 try:
                     processed_with_stats = AnalysisEngine.calculate_statistics(
                         processed_df,
@@ -1324,10 +1329,11 @@ class AnalysisEngine:
                         raw_data=data,
                         hk_gene=hk_gene,
                         sample_mapping=mapping,
+                        ttest_type=ttest_type,
                     )
                 except TypeError:
                     processed_with_stats = AnalysisEngine.calculate_statistics(
-                        processed_df, cmp_condition
+                        processed_df, cmp_condition, ttest_type=ttest_type
                     )
 
                 # --- Organize data for graphs ---
@@ -1461,9 +1467,13 @@ class GraphGenerator:
         # Create figure
         fig = go.Figure()
 
-        # Error bars
+        # Error bars - use SEM or SD based on user preference
+        error_bar_type = st.session_state.get("error_bar_type", "sem")
+        error_col = "SD" if error_bar_type == "sd" else "SEM"
+        if error_col not in gene_data_indexed.columns:
+            error_col = "SEM"  # Fallback for backward compatibility
         error_array = (
-            gene_data_indexed["SEM"] * settings.get("error_multiplier", 1.96)
+            gene_data_indexed[error_col] * settings.get("error_multiplier", 1.96)
         ).values
 
         # Per-bar settings for individual control
@@ -3332,6 +3342,36 @@ with tab2:
                         cmp_sample_key_2 = None
                 else:
                     cmp_sample_key_2 = None
+
+            # Statistical options
+            st.markdown("#### ⚙️ Statistical Options")
+            stat_col1, stat_col2 = st.columns(2)
+
+            with stat_col1:
+                ttest_type = st.radio(
+                    "T-test Type",
+                    ["welch", "student"],
+                    format_func=lambda x: "Welch's t-test (unequal variance)"
+                    if x == "welch"
+                    else "Student's t-test (equal variance)",
+                    index=0,
+                    key="ttest_type",
+                    help="Welch's is recommended - more robust when group variances differ",
+                )
+                st.session_state.ttest_type = ttest_type
+
+            with stat_col2:
+                error_bar_type = st.radio(
+                    "Error Bar Type",
+                    ["sem", "sd"],
+                    format_func=lambda x: "SEM (Standard Error of Mean)"
+                    if x == "sem"
+                    else "SD (Standard Deviation)",
+                    index=0,
+                    key="error_bar_type",
+                    help="SEM shows precision of mean estimate; SD shows data variability",
+                )
+                st.session_state.error_bar_type = error_bar_type
 
             # Visual summary
             st.markdown("---")

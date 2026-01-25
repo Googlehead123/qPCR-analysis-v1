@@ -1759,6 +1759,35 @@ class ReportGenerator:
     SLIDE_HEIGHT_INCHES = 7.5
 
     @staticmethod
+    def _fig_to_image(fig: go.Figure, format: str = "png", scale: int = 2) -> bytes:
+        """Convert Plotly figure to image bytes with proper error handling for Kaleido/Chrome."""
+        import os
+
+        # Try to set Chrome path for Streamlit Cloud (Chromium from packages.txt)
+        chrome_paths = [
+            "/usr/bin/chromium",
+            "/usr/bin/chromium-browser",
+            "/usr/bin/google-chrome",
+            "/usr/bin/google-chrome-stable",
+        ]
+        for chrome_path in chrome_paths:
+            if os.path.exists(chrome_path):
+                os.environ["CHROME_PATH"] = chrome_path
+                break
+
+        try:
+            return fig.to_image(format=format, scale=scale)
+        except Exception as e:
+            error_msg = str(e)
+            if "Chrome" in error_msg or "chromium" in error_msg.lower():
+                raise RuntimeError(
+                    "Image export requires Chrome/Chromium. "
+                    "On Streamlit Cloud, add 'chromium' to packages.txt. "
+                    "Locally, install Chrome or run: plotly_get_chrome"
+                ) from e
+            raise
+
+    @staticmethod
     def create_presentation(
         graphs: Dict[str, go.Figure],
         processed_data: Dict[str, pd.DataFrame],
@@ -1943,7 +1972,7 @@ class ReportGenerator:
             font=dict(size=14),
         )
 
-        img_bytes = fig_copy.to_image(format="png", scale=2)
+        img_bytes = ReportGenerator._fig_to_image(fig_copy, format="png", scale=2)
         img_stream = io.BytesIO(img_bytes)
 
         left = Inches(0.5)
@@ -2021,7 +2050,7 @@ class ReportGenerator:
                 font=dict(size=11),
             )
 
-            img_bytes = fig_copy.to_image(format="png", scale=2)
+            img_bytes = ReportGenerator._fig_to_image(fig_copy, format="png", scale=2)
             img_stream = io.BytesIO(img_bytes)
 
             slide.shapes.add_picture(img_stream, left, top, width=width)
@@ -2073,7 +2102,7 @@ class ReportGenerator:
                 title=dict(text=gene, font=dict(size=12)),
             )
 
-            img_bytes = fig_copy.to_image(format="png", scale=2)
+            img_bytes = ReportGenerator._fig_to_image(fig_copy, format="png", scale=2)
             img_stream = io.BytesIO(img_bytes)
 
             slide.shapes.add_picture(

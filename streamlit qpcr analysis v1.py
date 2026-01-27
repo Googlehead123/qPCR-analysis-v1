@@ -1493,9 +1493,8 @@ class GraphGenerator:
         error_col = "SD" if error_bar_type == "sd" else "SEM"
         if error_col not in gene_data_indexed.columns:
             error_col = "SEM"  # Fallback for backward compatibility
-        error_array = (
-            gene_data_indexed[error_col] * settings.get("error_multiplier", 1.96)
-        ).values
+        # Use SEM/SD values directly - they already contain error propagation
+        error_array = gene_data_indexed[error_col].values
 
         # Per-bar settings for individual control
         gene_bar_settings = st.session_state.get(f"{gene}_bar_settings", {})
@@ -3928,7 +3927,6 @@ with tab4:
                 "ylabel": "Relative mRNA Expression Level",
                 "bar_colors": {},
                 "orientation": "v",
-                "error_multiplier": 1.96,
                 "bar_opacity": 0.95,
                 "bar_gap": 0.15,
                 "marker_line_width": 1,

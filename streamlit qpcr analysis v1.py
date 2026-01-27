@@ -1008,17 +1008,14 @@ class AnalysisEngine:
                 target_sem = target_sd / np.sqrt(n_target) if n_target > 1 else 0
                 hk_sem = hk_sd / np.sqrt(n_hk) if n_hk > 1 else 0
 
-                # Correct error propagation for 2^(-ΔΔCt) transformation
-                # Using the formula: SEM(2^x) = 2^x * ln(2) * SEM(x)
-                # where x = -ΔΔCt and SEM(ΔΔCt) = sqrt(SEM_target^2 + SEM_hk^2)
+                # Simple SEM/SD calculation - combined error from target and HK genes
+                # Using root-sum-of-squares for independent measurements
                 combined_sem = np.sqrt(target_sem**2 + hk_sem**2)
+                sem = combined_sem
 
-                # SEM of relative expression = rel_expr * ln(2) * SEM(ΔCt)
-                sem = rel_expr * np.log(2) * combined_sem
-
-                # SD of relative expression (for error bar option)
+                # Simple SD calculation - combined from target and HK genes
                 combined_sd = np.sqrt(target_sd**2 + hk_sd**2)
-                sd = rel_expr * np.log(2) * combined_sd
+                sd = combined_sd
 
                 # Get original sample name and group
                 original_sample = cond_data["Sample"].iloc[0]

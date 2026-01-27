@@ -1026,6 +1026,12 @@ class AnalysisEngine:
                     "group", "Treatment"
                 )
 
+                # Calculate CV% (Coefficient of Variation)
+                target_cv = (
+                    (target_sd / target_ct_mean * 100) if target_ct_mean > 0 else 0
+                )
+                hk_cv = (hk_sd / hk_ct_mean * 100) if hk_ct_mean > 0 else 0
+
                 results.append(
                     {
                         "Target": target,
@@ -1036,8 +1042,10 @@ class AnalysisEngine:
                         "n_hk_replicates": n_hk,
                         "Target_Ct_Mean": target_ct_mean,
                         "Target_Ct_SD": target_sd,
+                        "Target_Ct_CV%": target_cv,
                         "HK_Ct_Mean": hk_ct_mean,
                         "HK_Ct_SD": hk_sd,
+                        "HK_Ct_CV%": hk_cv,
                         "Delta_Ct": delta_ct,
                         "Delta_Delta_Ct": ddct,
                         "Relative_Expression": rel_expr,
@@ -3684,6 +3692,35 @@ with tab2:
 
             # Statistical options
             st.markdown("#### ⚙️ Statistical Options")
+
+            # Statistics Information Box
+            with st.expander("ℹ️ Understanding Statistics Options", expanded=False):
+                st.markdown("""
+                **📊 Standard Deviation (SD)**  
+                - Calculated using Excel-like `=STDEV()` function on CT values
+                - Reflects **sample selection** from QC Check tab (excluded wells are NOT included)
+                - Shows **data variability** within replicates (2-3 values typically)
+                - Formula: `SD = sqrt(Σ(xi - mean)² / (n-1))`
+                - Displayed in results as `Target_Ct_SD`, `HK_Ct_SD`, and error bar option
+                
+                **📈 Coefficient of Variation (CV%)**  
+                - Calculated as: `CV% = (SD / Mean) × 100`
+                - Normalized measure of variability (allows comparison across different CT ranges)
+                - Lower CV% indicates better reproducibility
+                
+                **🎯 P-value Testing**  
+                - Statistical significance between conditions
+                - Uses t-test to compare treatment vs control groups
+                - Symbols: `*` p<0.05, `**` p<0.01, `***` p<0.001
+                - Respects QC exclusions (uses only included wells)
+                
+                **📏 Error Bars**  
+                - **SEM** (Standard Error of Mean): Shows precision of mean estimate = `SD / √n`
+                - **SD** (Standard Deviation): Shows data spread/variability
+                - Choose SEM for publication (smaller bars, shows reliability)
+                - Choose SD to show full data variation
+                """)
+
             stat_col1, stat_col2 = st.columns(2)
 
             with stat_col1:
@@ -3790,9 +3827,14 @@ with tab3:
                     "significance",
                     "n_replicates",
                     "Target_Ct_Mean",
+                    "Target_Ct_SD",
+                    "Target_Ct_CV%",
                     "HK_Ct_Mean",
+                    "HK_Ct_SD",
+                    "HK_Ct_CV%",
                     "Delta_Ct",
                     "SEM",
+                    "SD",
                 ]
 
                 # Filter to existing columns
@@ -3806,9 +3848,14 @@ with tab3:
                         "Fold_Change": "{:.3f}",
                         "p_value": "{:.4f}",
                         "Target_Ct_Mean": "{:.2f}",
+                        "Target_Ct_SD": "{:.3f}",
+                        "Target_Ct_CV%": "{:.1f}%",
                         "HK_Ct_Mean": "{:.2f}",
+                        "HK_Ct_SD": "{:.3f}",
+                        "HK_Ct_CV%": "{:.1f}%",
                         "Delta_Ct": "{:.2f}",
                         "SEM": "{:.3f}",
+                        "SD": "{:.3f}",
                     },
                     na_rep="—",
                 )

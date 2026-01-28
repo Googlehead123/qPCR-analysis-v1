@@ -245,3 +245,241 @@ class TestQCGridStateManagement:
 
         # State should still be there
         assert get_selected_cell(session_state) == ("GENE1", "Sample_A")
+
+
+class TestQCGridUIHelpers:
+    """Test suite for QC grid UI helper functions.
+
+    These tests validate data transformation functions that convert
+    triplicate-level qPCR data into grid display structures.
+
+    Helper functions to implement:
+    - build_grid_matrix(triplicate_data) -> dict
+    - get_cell_status_color(status) -> str
+    - get_cell_display_text(cell_data) -> str
+    """
+
+    def test_build_grid_matrix_creates_nested_dict_structure(
+        self, mock_streamlit, sample_qpcr_raw_data
+    ):
+        """
+        build_grid_matrix should transform triplicate DataFrame into
+        a nested dictionary structure: {gene: {sample: cell_data}}.
+
+        This structure enables efficient grid rendering where each cell
+        contains aggregated statistics for a gene-sample combination.
+        """
+        spec = import_module("streamlit qpcr analysis v1")
+        build_grid_matrix = spec.build_grid_matrix
+
+        # Get triplicate data (requires QualityControl class)
+        qc = spec.QualityControl()
+        triplicate_data = qc.get_triplicate_data(sample_qpcr_raw_data)
+
+        # Build grid matrix
+        matrix = build_grid_matrix(triplicate_data)
+
+        # Should return a dictionary
+        assert isinstance(matrix, dict), "Grid matrix must be a dictionary"
+
+        # Should have genes as top-level keys
+        assert len(matrix) > 0, "Grid matrix should not be empty"
+
+        # Each gene should map to a dict of samples
+        for gene, samples_dict in matrix.items():
+            assert isinstance(gene, str), "Gene key must be a string"
+            assert isinstance(samples_dict, dict), (
+                "Each gene should map to a dictionary of samples"
+            )
+
+            # Each sample should have cell data
+            for sample, cell_data in samples_dict.items():
+                assert isinstance(sample, str), "Sample key must be a string"
+                assert isinstance(cell_data, dict), "Cell data must be a dictionary"
+
+    def test_build_grid_matrix_cell_data_contains_required_fields(
+        self, mock_streamlit, sample_qpcr_raw_data
+    ):
+        """
+        Each cell in the grid matrix should contain required fields:
+        mean_ct, cv, status, n.
+
+        These fields are necessary for rendering cell content and
+        determining cell styling.
+        """
+        spec = import_module("streamlit qpcr analysis v1")
+        build_grid_matrix = spec.build_grid_matrix
+
+        qc = spec.QualityControl()
+        triplicate_data = qc.get_triplicate_data(sample_qpcr_raw_data)
+
+        matrix = build_grid_matrix(triplicate_data)
+
+        # Check that all cells have required fields
+        required_fields = {"mean_ct", "cv", "status", "n"}
+        for gene, samples_dict in matrix.items():
+            for sample, cell_data in samples_dict.items():
+                for field in required_fields:
+                    assert field in cell_data, (
+                        f"Cell data for {gene}/{sample} missing field: {field}"
+                    )
+
+    def test_get_cell_status_color_maps_ok_to_green(self, mock_streamlit):
+        """
+        get_cell_status_color should map "OK" status to green color.
+
+        Green (#d4edda) indicates the cell has no quality issues.
+        """
+        spec = import_module("streamlit qpcr analysis v1")
+        get_cell_status_color = spec.get_cell_status_color
+
+        color = get_cell_status_color("OK")
+
+        assert isinstance(color, str), "Color must be a string"
+        assert color == "#d4edda", "OK status should map to green color (#d4edda)"
+
+    def test_get_cell_status_color_maps_warnings_to_yellow(self, mock_streamlit):
+        """
+        get_cell_status_color should map warning statuses to yellow color.
+
+        Yellow (#fff3cd) indicates quality concerns that need attention
+        but are not critical (e.g., High CV, Low n).
+        """
+        spec = import_module("streamlit qpcr analysis v1")
+        get_cell_status_color = spec.get_cell_status_color
+
+        # Test various warning statuses
+        warning_statuses = [
+            "High CV (5.2%)",
+            "Low n",
+            "High range (1.5)",
+        ]
+
+        for status in warning_statuses:
+            color = get_cell_status_color(status)
+            assert color == "#fff3cd", (
+                f"Warning status '{status}' should map to yellow (#fff3cd)"
+            )
+
+    def test_get_cell_status_color_maps_errors_to_red(self, mock_streamlit):
+        """
+        get_cell_status_color should map error statuses to red color.
+
+        Red (#f8d7da) indicates critical quality issues that may
+        invalidate the data (e.g., Has outlier, High range > 2.0).
+        """
+        spec = import_module("streamlit qpcr analysis v1")
+        get_cell_status_color = spec.get_cell_status_color
+
+        # Test various error statuses
+        error_statuses = [
+            "Has outlier",
+            "High range (2.5)",
+        ]
+
+        for status in error_statuses:
+            color = get_cell_status_color(status)
+            assert color == "#f8d7da", (
+                f"Error status '{status}' should map to red (#f8d7da)"
+            )
+
+    def test_get_cell_display_text_formats_compact_string(self, mock_streamlit):
+        """
+        get_cell_display_text should format cell data into a compact
+        display string like "n=3, CV=2.1%".
+
+        This string is displayed in the grid cell and should be concise
+        to fit in the cell without wrapping.
+        """
+        spec = import_module("streamlit qpcr analysis v1")
+        get_cell_display_text = spec.get_cell_display_text
+
+        cell_data = {
+            "mean_ct": 18.5,
+            "cv": 2.1,
+            "status": "OK",
+            "n": 3,
+        }
+
+        text = get_cell_display_text(cell_data)
+
+        assert isinstance(text, str), "Display text must be a string"
+        assert "n=" in text, "Display text should include sample count"
+        assert "CV=" in text, "Display text should include CV percentage"
+        assert "3" in text, "Display text should contain the n value"
+        assert "2.1" in text, "Display text should contain the CV value"
+
+    def test_get_cell_display_text_handles_edge_case_single_replicate(
+        self, mock_streamlit
+    ):
+        """
+        get_cell_display_text should handle edge case of single replicate (n=1).
+
+        With only one replicate, CV cannot be calculated (would be 0 or undefined).
+        The function should handle this gracefully.
+        """
+        spec = import_module("streamlit qpcr analysis v1")
+        get_cell_display_text = spec.get_cell_display_text
+
+        cell_data = {
+            "mean_ct": 20.0,
+            "cv": 0.0,  # CV undefined for n=1
+            "status": "Low n",
+            "n": 1,
+        }
+
+        text = get_cell_display_text(cell_data)
+
+        assert isinstance(text, str), "Display text must be a string"
+        assert len(text) > 0, "Display text should not be empty"
+        assert "1" in text, "Display text should show n=1"
+
+    def test_build_grid_matrix_handles_empty_dataframe(self, mock_streamlit):
+        """
+        build_grid_matrix should handle empty DataFrame gracefully.
+
+        When no data is available, it should return an empty dictionary
+        rather than raising an exception.
+        """
+        spec = import_module("streamlit qpcr analysis v1")
+        build_grid_matrix = spec.build_grid_matrix
+        import pandas as pd
+
+        empty_df = pd.DataFrame()
+
+        matrix = build_grid_matrix(empty_df)
+
+        assert isinstance(matrix, dict), "Should return a dictionary"
+        assert len(matrix) == 0, "Empty input should produce empty matrix"
+
+    def test_build_grid_matrix_handles_single_gene_single_sample(self, mock_streamlit):
+        """
+        build_grid_matrix should handle minimal data: single gene, single sample.
+
+        This edge case validates that the function works with minimal
+        but valid input data.
+        """
+        spec = import_module("streamlit qpcr analysis v1")
+        build_grid_matrix = spec.build_grid_matrix
+        import pandas as pd
+
+        # Create minimal triplicate data
+        minimal_data = pd.DataFrame(
+            {
+                "Sample": ["Sample1", "Sample1", "Sample1"],
+                "Target": ["GENE1", "GENE1", "GENE1"],
+                "Mean_CT": [20.0, 20.0, 20.0],
+                "SD": [0.1, 0.1, 0.1],
+                "n": [3, 3, 3],
+                "CV_pct": [0.5, 0.5, 0.5],
+                "Range": [0.2, 0.2, 0.2],
+                "Status": ["OK", "OK", "OK"],
+                "Severity": ["ok", "ok", "ok"],
+            }
+        )
+
+        matrix = build_grid_matrix(minimal_data)
+
+        assert isinstance(matrix, dict), "Should return a dictionary"
+        assert "GENE1" in matrix, "Should contain the gene"
+        assert "Sample1" in matrix["GENE1"], "Should contain the sample"

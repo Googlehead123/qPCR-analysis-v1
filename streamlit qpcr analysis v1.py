@@ -45,7 +45,56 @@ COSMAX_LAB_WHITE = "#F3F0ED"  # Secondary background (off-white)
 COSMAX_FROST_GREY = "#C1C6C7"  # Secondary elements, table headers
 COSMAX_CREAM = "#D4CEC1"  # Secondary data series, neutral accents
 
+
 # ==================== SESSION STATE INIT ====================
+# Helper function for well exclusion management
+def get_well_exclusion_key(gene: str, sample: str) -> tuple:
+    """Generate key for per-gene-sample well exclusions."""
+    return (gene, sample)
+
+
+def is_well_excluded(well: str, gene: str, sample: str) -> bool:
+    """Check if a well is excluded for a specific gene-sample combination."""
+    key = get_well_exclusion_key(gene, sample)
+    if key in st.session_state.excluded_wells:
+        return well in st.session_state.excluded_wells[key]
+    return False
+
+
+def exclude_well(well: str, gene: str, sample: str) -> None:
+    """Exclude a well for a specific gene-sample combination."""
+    key = get_well_exclusion_key(gene, sample)
+    if key not in st.session_state.excluded_wells:
+        st.session_state.excluded_wells[key] = set()
+    st.session_state.excluded_wells[key].add(well)
+
+
+def include_well(well: str, gene: str, sample: str) -> None:
+    """Include a well (remove from exclusion) for a specific gene-sample combination."""
+    key = get_well_exclusion_key(gene, sample)
+    if key in st.session_state.excluded_wells:
+        st.session_state.excluded_wells[key].discard(well)
+
+
+def get_excluded_wells_for_analysis(gene: str, sample: str) -> set:
+    """Get excluded wells for a specific gene-sample combination."""
+    key = get_well_exclusion_key(gene, sample)
+    if key in st.session_state.excluded_wells:
+        return st.session_state.excluded_wells[key]
+    return set()
+
+
+def get_all_excluded_wells() -> set:
+    """Get all excluded wells across all gene-sample combinations as a set.
+
+    Compatibility function for QualityControl methods that expect a set parameter.
+    """
+    excluded = set()
+    for wells_set in st.session_state.excluded_wells.values():
+        excluded.update(wells_set)
+    return excluded
+
+
 for key in [
     "data",
     "processed_data",
@@ -63,7 +112,13 @@ for key in [
             {}
             if key
             in ["sample_mapping", "analysis_templates", "graphs", "condition_colors"]
-            else (set() if "excluded" in key else None)
+            else (
+                dict()
+                if key == "excluded_wells"
+                else set()
+                if "excluded" in key
+                else None
+            )
         )
 
 # ==================== EFFICACY DATABASE ====================
@@ -2968,7 +3023,7 @@ with tab_qc:
         hk_gene = st.session_state.get("hk_gene")
 
         if "excluded_wells" not in st.session_state:
-            st.session_state.excluded_wells = set()
+            st.session_state.excluded_wells = {}
         if "excluded_wells_history" not in st.session_state:
             st.session_state.excluded_wells_history = []
 
@@ -2983,10 +3038,8 @@ with tab_qc:
             unsafe_allow_html=True,
         )
 
-        # Get comprehensive QC stats
-        qc_stats = QualityControl.get_qc_summary_stats(
-            data, st.session_state.excluded_wells
-        )
+        # Get comprehensive QC stats using helper to get all excluded wells
+        qc_stats = QualityControl.get_qc_summary_stats(data, get_all_excluded_wells())
 
         # Summary metrics row
         metric_cols = st.columns(6)
@@ -3100,8 +3153,9 @@ with tab_qc:
                 st.session_state.prev_filters = current_filters
 
             # Get triplicate data
+            # Use helper to get all excluded wells
             triplicate_data = QualityControl.get_triplicate_data(
-                data, st.session_state.excluded_wells
+                data, get_all_excluded_wells()
             )
 
             if not triplicate_data.empty:
@@ -3191,8 +3245,10 @@ with tab_qc:
 
                             # Create editable dataframe with Include checkbox
                             editor_df = wells_df.copy()
-                            editor_df["Include"] = ~editor_df["Well"].isin(
-                                st.session_state.excluded_wells
+                            editor_df["Include"] = editor_df["Well"].apply(
+                                lambda w: not is_well_excluded(
+                                    w, selected_target, selected_sample
+                                )
                             )
                             editor_df["CT"] = editor_df["CT"].round(2)
                             editor_df["Deviation"] = editor_df["Deviation"].round(3)
@@ -3259,24 +3315,32 @@ with tab_qc:
                                     well = row["Well"]
                                     include = row["Include"]
 
-                                    if (
-                                        not include
-                                        and well not in st.session_state.excluded_wells
+                                    if not include and not is_well_excluded(
+                                        well, selected_target, selected_sample
                                     ):
                                         # Add to excluded
                                         st.session_state.excluded_wells_history.append(
-                                            st.session_state.excluded_wells.copy()
+                                            {
+                                                k: v.copy()
+                                                for k, v in st.session_state.excluded_wells.items()
+                                            }
                                         )
-                                        st.session_state.excluded_wells.add(well)
-                                    elif (
-                                        include
-                                        and well in st.session_state.excluded_wells
+                                        exclude_well(
+                                            well, selected_target, selected_sample
+                                        )
+                                    elif include and is_well_excluded(
+                                        well, selected_target, selected_sample
                                     ):
                                         # Remove from excluded
                                         st.session_state.excluded_wells_history.append(
-                                            st.session_state.excluded_wells.copy()
+                                            {
+                                                k: v.copy()
+                                                for k, v in st.session_state.excluded_wells.items()
+                                            }
                                         )
-                                        st.session_state.excluded_wells.discard(well)
+                                        include_well(
+                                            well, selected_target, selected_sample
+                                        )
 
                             # Quick action buttons for this triplicate
                             st.markdown("**Quick Actions:**")
@@ -3287,7 +3351,9 @@ with tab_qc:
                                     data,
                                     selected_sample,
                                     selected_target,
-                                    st.session_state.excluded_wells,
+                                    get_excluded_wells_for_analysis(
+                                        selected_target, selected_sample
+                                    ),
                                     strategy="outlier",
                                 )
                                 if suggestions and st.button(
@@ -3295,10 +3361,15 @@ with tab_qc:
                                     key=f"excl_outlier_{selected_sample}_{selected_target}",
                                 ):
                                     st.session_state.excluded_wells_history.append(
-                                        st.session_state.excluded_wells.copy()
+                                        {
+                                            k: v.copy()
+                                            for k, v in st.session_state.excluded_wells.items()
+                                        }
                                     )
                                     for well in suggestions:
-                                        st.session_state.excluded_wells.add(well)
+                                        exclude_well(
+                                            well, selected_target, selected_sample
+                                        )
                                     st.rerun()
 
                             with action_cols[1]:
@@ -3311,15 +3382,22 @@ with tab_qc:
                                         data,
                                         selected_sample,
                                         selected_target,
-                                        st.session_state.excluded_wells,
+                                        get_excluded_wells_for_analysis(
+                                            selected_target, selected_sample
+                                        ),
                                         strategy="keep_best_2",
                                     )
                                     if suggestions:
                                         st.session_state.excluded_wells_history.append(
-                                            st.session_state.excluded_wells.copy()
+                                            {
+                                                k: v.copy()
+                                                for k, v in st.session_state.excluded_wells.items()
+                                            }
                                         )
                                         for well in suggestions:
-                                            st.session_state.excluded_wells.add(well)
+                                            exclude_well(
+                                                well, selected_target, selected_sample
+                                            )
                                         st.rerun()
 
                             with action_cols[2]:
@@ -3327,17 +3405,24 @@ with tab_qc:
                                 excluded_in_triplicate = [
                                     w
                                     for w in wells_df["Well"].tolist()
-                                    if w in st.session_state.excluded_wells
+                                    if is_well_excluded(
+                                        w, selected_target, selected_sample
+                                    )
                                 ]
                                 if excluded_in_triplicate and st.button(
                                     "✅ Include All",
                                     key=f"incl_all_{selected_sample}_{selected_target}",
                                 ):
                                     st.session_state.excluded_wells_history.append(
-                                        st.session_state.excluded_wells.copy()
+                                        {
+                                            k: v.copy()
+                                            for k, v in st.session_state.excluded_wells.items()
+                                        }
                                     )
                                     for well in excluded_in_triplicate:
-                                        st.session_state.excluded_wells.discard(well)
+                                        include_well(
+                                            well, selected_target, selected_sample
+                                        )
                                     st.rerun()
 
                             with action_cols[3]:
@@ -3347,10 +3432,15 @@ with tab_qc:
                                     key=f"excl_all_{selected_sample}_{selected_target}",
                                 ):
                                     st.session_state.excluded_wells_history.append(
-                                        st.session_state.excluded_wells.copy()
+                                        {
+                                            k: v.copy()
+                                            for k, v in st.session_state.excluded_wells.items()
+                                        }
                                     )
                                     for well in all_wells_in_triplicate:
-                                        st.session_state.excluded_wells.add(well)
+                                        exclude_well(
+                                            well, selected_target, selected_sample
+                                        )
                                     st.rerun()
                     else:
                         st.warning("Selected cell data not found in current view.")
@@ -3368,8 +3458,9 @@ with tab_qc:
             heatmap_col1, heatmap_col2 = st.columns([2, 1])
 
             with heatmap_col1:
+                # Use helper to get all excluded wells for heatmap
                 plate_fig = QualityControl.create_plate_heatmap(
-                    data, value_col="CT", excluded_wells=st.session_state.excluded_wells
+                    data, value_col="CT", excluded_wells=get_all_excluded_wells()
                 )
                 st.plotly_chart(plate_fig, use_container_width=True)
                 st.caption(
@@ -3421,15 +3512,20 @@ with tab_qc:
                 wells_df = wells_df[wells_df["Target"] == selected_gene_filter_qc]
 
             # Add Include column based on current exclusion state
-            wells_df["Include"] = ~wells_df["Well"].isin(
-                st.session_state.excluded_wells
+            wells_df["Include"] = wells_df.apply(
+                lambda r: not is_well_excluded(r["Well"], r["Target"], r["Sample"]),
+                axis=1,
             )
 
             # Reorder columns for display
             wells_df = wells_df[["Include", "Well", "Sample", "Target", "CT"]]
 
+            # Count total excluded wells across all gene-sample combinations
+            total_excluded = sum(
+                len(wells_set) for wells_set in st.session_state.excluded_wells.values()
+            )
             st.markdown(
-                f"**Showing {len(wells_df)} wells** (Total excluded: {len(st.session_state.excluded_wells)})"
+                f"**Showing {len(wells_df)} wells** (Total excluded: {total_excluded})"
             )
 
             # Data editor for well selection
@@ -3458,24 +3554,32 @@ with tab_qc:
                 key="qc_summary_well_editor",
             )
 
-            # Process changes - update excluded_wells set
+            # Process changes - update excluded_wells dict with per-gene-sample exclusions
             if edited_wells_df is not None:
                 for idx, row in edited_wells_df.iterrows():
                     well = row["Well"]
+                    gene = row["Target"]
+                    sample = row["Sample"]
                     include = row["Include"]
 
                     # If unchecked (not include) and not already excluded -> add to excluded set
-                    if not include and well not in st.session_state.excluded_wells:
+                    if not include and not is_well_excluded(well, gene, sample):
                         st.session_state.excluded_wells_history.append(
-                            st.session_state.excluded_wells.copy()
+                            {
+                                k: v.copy()
+                                for k, v in st.session_state.excluded_wells.items()
+                            }
                         )
-                        st.session_state.excluded_wells.add(well)
+                        exclude_well(well, gene, sample)
                     # If checked (include) and currently excluded -> remove from excluded set
-                    elif include and well in st.session_state.excluded_wells:
+                    elif include and is_well_excluded(well, gene, sample):
                         st.session_state.excluded_wells_history.append(
-                            st.session_state.excluded_wells.copy()
+                            {
+                                k: v.copy()
+                                for k, v in st.session_state.excluded_wells.items()
+                            }
                         )
-                        st.session_state.excluded_wells.discard(well)
+                        include_well(well, gene, sample)
 
             # Batch action buttons
             st.markdown("### Quick Actions")
@@ -3488,11 +3592,16 @@ with tab_qc:
                     use_container_width=True,
                 ):
                     st.session_state.excluded_wells_history.append(
-                        st.session_state.excluded_wells.copy()
+                        {
+                            k: v.copy()
+                            for k, v in st.session_state.excluded_wells.items()
+                        }
                     )
-                    visible_wells = wells_df["Well"].tolist()
-                    for well in visible_wells:
-                        st.session_state.excluded_wells.discard(well)
+                    for idx, row in wells_df.iterrows():
+                        well = row["Well"]
+                        gene = row["Target"]
+                        sample = row["Sample"]
+                        include_well(well, gene, sample)
                     st.rerun()
 
             with action_cols[1]:
@@ -3502,11 +3611,16 @@ with tab_qc:
                     use_container_width=True,
                 ):
                     st.session_state.excluded_wells_history.append(
-                        st.session_state.excluded_wells.copy()
+                        {
+                            k: v.copy()
+                            for k, v in st.session_state.excluded_wells.items()
+                        }
                     )
-                    visible_wells = wells_df["Well"].tolist()
-                    for well in visible_wells:
-                        st.session_state.excluded_wells.add(well)
+                    for idx, row in wells_df.iterrows():
+                        well = row["Well"]
+                        gene = row["Target"]
+                        sample = row["Sample"]
+                        exclude_well(well, gene, sample)
                     st.rerun()
 
             with action_cols[2]:
@@ -3516,9 +3630,12 @@ with tab_qc:
                     use_container_width=True,
                 ):
                     st.session_state.excluded_wells_history.append(
-                        st.session_state.excluded_wells.copy()
+                        {
+                            k: v.copy()
+                            for k, v in st.session_state.excluded_wells.items()
+                        }
                     )
-                    st.session_state.excluded_wells = set()
+                    st.session_state.excluded_wells = {}
                     st.rerun()
 
             with action_cols[3]:
@@ -3552,8 +3669,9 @@ with tab_qc:
                 flagged_display = flagged[
                     ["Well", "Sample", "Target", "CT", "Issues", "Severity"]
                 ].copy()
-                flagged_display["Exclude"] = flagged_display["Well"].isin(
-                    st.session_state.excluded_wells
+                flagged_display["Exclude"] = flagged_display.apply(
+                    lambda r: is_well_excluded(r["Well"], r["Target"], r["Sample"]),
+                    axis=1,
                 )
                 flagged_display = flagged_display[
                     ["Exclude", "Well", "Sample", "Target", "CT", "Issues", "Severity"]
@@ -3587,18 +3705,26 @@ with tab_qc:
                 if edited_flagged is not None:
                     for idx, row in edited_flagged.iterrows():
                         well = row["Well"]
+                        gene = row["Target"]
+                        sample = row["Sample"]
                         exclude = row["Exclude"]
 
-                        if exclude and well not in st.session_state.excluded_wells:
+                        if exclude and not is_well_excluded(well, gene, sample):
                             st.session_state.excluded_wells_history.append(
-                                st.session_state.excluded_wells.copy()
+                                {
+                                    k: v.copy()
+                                    for k, v in st.session_state.excluded_wells.items()
+                                }
                             )
-                            st.session_state.excluded_wells.add(well)
-                        elif not exclude and well in st.session_state.excluded_wells:
+                            exclude_well(well, gene, sample)
+                        elif not exclude and is_well_excluded(well, gene, sample):
                             st.session_state.excluded_wells_history.append(
-                                st.session_state.excluded_wells.copy()
+                                {
+                                    k: v.copy()
+                                    for k, v in st.session_state.excluded_wells.items()
+                                }
                             )
-                            st.session_state.excluded_wells.discard(well)
+                            include_well(well, gene, sample)
 
                 # Batch action buttons
                 batch_cols = st.columns(3)
@@ -3609,18 +3735,24 @@ with tab_qc:
                         use_container_width=True,
                     ):
                         st.session_state.excluded_wells_history.append(
-                            st.session_state.excluded_wells.copy()
+                            {
+                                k: v.copy()
+                                for k, v in st.session_state.excluded_wells.items()
+                            }
                         )
                         for _, row in flagged.iterrows():
-                            st.session_state.excluded_wells.add(row["Well"])
+                            exclude_well(row["Well"], row["Target"], row["Sample"])
                         st.rerun()
 
                 with batch_cols[1]:
                     if st.button("✅ Clear All Exclusions", use_container_width=True):
                         st.session_state.excluded_wells_history.append(
-                            st.session_state.excluded_wells.copy()
+                            {
+                                k: v.copy()
+                                for k, v in st.session_state.excluded_wells.items()
+                            }
                         )
-                        st.session_state.excluded_wells = set()
+                        st.session_state.excluded_wells = {}
                         st.rerun()
 
                 with batch_cols[2]:
@@ -3719,7 +3851,10 @@ with tab_qc:
 
         # ==================== BOTTOM STATUS BAR ====================
         st.markdown("---")
-        excluded_count = len(st.session_state.excluded_wells)
+        # Count total excluded wells across all gene-sample combinations
+        excluded_count = sum(
+            len(wells_set) for wells_set in st.session_state.excluded_wells.values()
+        )
 
         status_cols = st.columns([2, 1, 1])
         with status_cols[0]:
